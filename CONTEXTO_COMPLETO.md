@@ -7,6 +7,15 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
 Última atualização: 2026-08-25.
 
+> **Nota de correção (2026-08-25):** circulou uma versão de diagrama (mermaid.live)
+> com um estado **"EMPATE"** e um estado **"NOCAUTE"** separados, faltando
+> **PAUSA/RETOMANDO** e **CONTAGEM_REGRESSIVA**, e com uma paleta de cores antiga
+> (amarelo pro aviso, ciano pro scoring). Isso **não reflete as regras/decisões
+> atuais** — em especial, **não existe empate** pelas regras oficiais da RoboCore
+> (seção 4.1) e a paleta foi revisada pra 4 matizes + branco (seção 4.3). O diagrama
+> corrigido está na seção 4.4a abaixo. Use sempre este documento como fonte de
+> verdade, não diagramas soltos.
+
 ---
 
 ## Sumário
@@ -15,10 +24,12 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 2. [Sistema 1: botão físico → judge.tapout.gg (`tapout-forfeit-trigger`)](#2-sistema-1-botão-físico--judgetapoutgg)
 3. [Mapa de comportamento real do site judge.tapout.gg](#3-mapa-de-comportamento-real-do-site-judgetapoutgg)
 4. [Sistema 2: controlador de iluminação DMX512 da arena](#4-sistema-2-controlador-de-iluminação-dmx512-da-arena)
+   - [4.4a Diagrama visual corrigido (fluxo completo)](#44a-diagrama-visual-corrigido-fluxo-completo)
 5. [O que mudou do desenho original pro reconciliado](#5-o-que-mudou-do-desenho-original-pro-reconciliado)
 6. [Próximos passos em aberto](#6-próximos-passos-em-aberto)
-7. [Guia de setup num computador novo (testado e funcionando)](#7-guia-de-setup-num-computador-novo)
-8. [Preferências de trabalho do Erik](#8-preferências-de-trabalho-do-erik)
+7. [Conectar fitas de LED no ESP32 — opções pesquisadas](#7-conectar-fitas-de-led-no-esp32--opções-pesquisadas)
+8. [Guia de setup num computador novo (testado e funcionando)](#8-guia-de-setup-num-computador-novo)
+9. [Preferências de trabalho do Erik](#9-preferências-de-trabalho-do-erik)
 
 ---
 
@@ -386,6 +397,136 @@ nunca deriva AVISO_10S sozinha (não tem cronômetro pra ler) — o controlador
 simplesmente fica em COMBATE até alguém clicar pausar/k.o./desistência/encerrar
 manualmente. Não é um ramo novo, é a ausência de uma condição.
 
+### 4.4a Diagrama visual corrigido (fluxo completo)
+
+Versão corrigida do diagrama que circulou por fora deste documento — mesma estrutura
+geral (Sistema 1 + Sistema 2 lado a lado), mas com os **8 estados reais** (sem
+"EMPATE", sem "NOCAUTE" separado, com PAUSA/RETOMANDO/CONTAGEM_REGRESSIVA) e a
+**paleta de cores revisada** (seção 4.3), não a paleta antiga (verde/amarelo/ciano).
+Cole em https://mermaid.live pra visualizar, ou renderize direto num Markdown viewer
+que suporte mermaid (GitHub renderiza automaticamente).
+
+```mermaid
+graph TD
+    A["SISTEMA ARENA DE COMBATE<br/>ESP32 + judge.tapout.gg + DMX512"]
+
+    A --> B["SISTEMA 1:<br/>Controle de Partida"]
+    A --> C["SISTEMA 2:<br/>Controle de Iluminação"]
+
+    %% SISTEMA 1: TAPOUT-FORFEIT-TRIGGER (implementado e testado)
+    B --> B1["Botão Físico<br/>GPIO25 - ESP32"]
+    B1 --> B2{Segura<br/>~1s?}
+    B2 -->|Não| B1
+    B2 -->|Sim| B3{Estado<br/>Partida?}
+
+    B3 -->|Primeira vez| B4["Envia 'START'<br/>via Serial 115200"]
+    B3 -->|Segunda vez| B5["Envia 'FORFEIT'<br/>via Serial 115200"]
+
+    B4 --> B6["watch_button.py recebe"]
+    B5 --> B6
+
+    B6 --> B7["Inicia Node.js<br/>forfeit.mjs --interactive"]
+
+    B7 --> B8{Comando?}
+    B8 -->|START| B9["Abre Chrome<br/>Cria Sala + Inicia Round"]
+    B8 -->|FORFEIT| B10["Desistência<br/>Encerra Round"]
+
+    B9 --> B11["judge.tapout.gg<br/>Partida Iniciada"]
+    B10 --> B12["judge.tapout.gg<br/>Partida Encerrada"]
+
+    B11 --> B1
+    B12 --> B1
+
+    %% SISTEMA 2: CONTROLADOR DMX512 (design, nada construído)
+    C --> C1["Script leitor observa 'phase'<br/>na tela do admin (Playwright)"]
+
+    C1 --> C2{Fase real do site<br/>ou derivada?}
+
+    C2 -->|configuring| C3["STANDBY<br/>Branco 25% (W=64)"]
+    C2 -->|starting| C4["CONTAGEM_REGRESSIVA<br/>Pisca Azul/Branco pleno 3→2→1"]
+    C2 -->|live, timer >10s| C5["COMBATE<br/>Branco 100% (W=255)"]
+    C2 -->|live, timer ≤10s| C6["AVISO_10S<br/>Branco pulsando W 45%↔100%, 1Hz→2Hz"]
+    C2 -->|paused| C7["PAUSA<br/>Âmbar pulsante 1Hz"]
+    C2 -->|resuming| C7b["RETOMANDO<br/>Mesma sequência da CONTAGEM_REGRESSIVA"]
+    C2 -->|scoring| C8["PONTUACAO<br/>Azul pulsando lento nos 2 lados"]
+    C2 -->|finalized| C9["RESULTADO<br/>Verde no vencedor / Vermelho no perdedor"]
+
+    C9 -->|"configuring" de novo| C3
+    C5 -.->|k.o. ou desistência: phase pula direto| C9
+    C7 -.->|k.o. ou desistência: phase pula direto| C9
+
+    %% Botões do Controlador DMX
+    C11["6 Botões Físicos:<br/>2 Competidores + 4 Centrais"]
+
+    C11 --> C12["Botão Competidor Azul<br/>Pronto (local) / Desistir"]
+    C11 --> C13["Botão Competidor Vermelho<br/>Pronto (local) / Desistir"]
+    C11 --> C14["4 Botões Centrais<br/>Pausar/Retomar, K.O.-Azul, K.O.-Vermelho, Encerrar"]
+
+    C12 --> C15["Escreve Canais DMX<br/>1-8 Lado Azul"]
+    C13 --> C16["Escreve Canais DMX<br/>9-16 Lado Vermelho"]
+    C14 --> C17["Dispara ação no site<br/>via script no PC"]
+
+    C15 --> C18["2 Focos RGBW<br/>Lado Azul"]
+    C16 --> C19["2 Focos RGBW<br/>Lado Vermelho"]
+
+    C18 --> C20["Arena Iluminada"]
+    C19 --> C20
+
+    C20 -.->|Retorna ao monitoramento| C1
+
+    %% Paleta de cores (revisada — seção 4.3, NÃO a paleta antiga com amarelo/ciano)
+    C3 -.->|Paleta| D1["Branco 25%"]
+    C4 -.->|Paleta| D2["Azul / Branco 100% piscando"]
+    C5 -.->|Paleta| D3["Branco 100%"]
+    C6 -.->|Paleta| D4["Branco pulsando (mesma matiz)"]
+    C7 -.->|Paleta| D5["Âmbar pulsante"]
+    C8 -.->|Paleta| D6["Azul pulsando lento"]
+    C9 -.->|Paleta| D7["Verde vencedor / Vermelho perdedor"]
+
+    %% Hardware base
+    B1 -.->|Alimentação| E["ESP32 JVTECH V4.0<br/>GPIO25, GPIO2 LED (Sistema 1)"]
+    C11 -.->|Alimentação| E2["ESP32 DevKit novo<br/>sem LoRa, GPIOs livres (Sistema 2 — a comprar)"]
+
+    E -.->|USB/Serial| F["PC/Windows<br/>Python + Node.js + Chrome"]
+    E2 -.->|USB/Serial| F
+
+    F -.->|DMX512 Output| G["Controlador DMX<br/>16 canais usados, 1 universo"]
+
+    G -.->|XLR / RS-485| H["4 Fixtures RGBW<br/>2 Azul + 2 Vermelho<br/>Terminador 120Ω"]
+
+    style A fill:#ff9d3d,stroke:#141a17,stroke-width:3px,color:#141a17
+    style B fill:#f2e0c8,stroke:#c96a12,stroke-width:2px
+    style C fill:#f2e0c8,stroke:#c96a12,stroke-width:2px
+    style E fill:#ddd,stroke:#141a17,stroke-width:2px
+    style E2 fill:#ddd,stroke:#141a17,stroke-width:2px,stroke-dasharray: 4 3
+    style F fill:#ddd,stroke:#141a17,stroke-width:2px
+    style G fill:#ddd,stroke:#141a17,stroke-width:2px
+    style H fill:#ddd,stroke:#141a17,stroke-width:2px
+
+    style C3 fill:#f0f0f0,stroke:#333
+    style C4 fill:#dbe9ff,stroke:#0040ff
+    style C5 fill:#ffffff,stroke:#333,stroke-width:2px
+    style C6 fill:#f0f0f0,stroke:#333,stroke-dasharray: 2 2
+    style C7 fill:#ffe9c2,stroke:#cc8800
+    style C7b fill:#dbe9ff,stroke:#0040ff
+    style C8 fill:#dbe9ff,stroke:#0040ff
+    style C9 fill:#c8f2c8,stroke:#2d7d2d
+```
+
+Principais correções em relação à versão que circulou:
+- Removido o estado **EMPATE** (não existe pelas regras oficiais — seção 4.1).
+- Removido o estado **NOCAUTE** como nó separado — k.o. é um atalho que pula direto
+  pra RESULTADO (setas tracejadas no diagrama), não um estado de luz próprio.
+- Adicionados **PAUSA**, **RETOMANDO** e **CONTAGEM_REGRESSIVA**, que existem na
+  máquina de estados real do site e faltavam no diagrama anterior.
+- Paleta de cores trocada pra refletir a decisão revisada (branco 2 intensidades
+  pra standby/combate, pulso sem trocar matiz no aviso, azul/branco na contagem,
+  âmbar só na pausa) — a versão anterior usava amarelo e ciano, que foram
+  descartados.
+- Separado o hardware do Sistema 1 (ESP32 JVTECH, já em uso) do Sistema 2 (ESP32
+  novo, ainda por comprar) — no diagrama antigo os dois apareciam ligados ao mesmo
+  bloco "E", o que sugeria (incorretamente) que seria a mesma placa física.
+
 ### 4.5 Comandos — o que exatamente o script leitor observa
 
 Cada transição corresponde a um texto ou atributo específico visto na tela do admin.
@@ -525,9 +666,9 @@ real (seção 3), várias coisas mudaram:
       dedicado, do jeito que foi feito pro `forfeit.mjs` original (ver 3.6 e 4.5).
 - [ ] Escrever o firmware ESP32 (biblioteca `esp_dmx` ou `Conceptinetics`) que
       implementa os 8 estados + sub-estado descritos.
-- [ ] Decidir/testar o hardware de LED real (fixtures RGBW compatíveis com DMX512,
-      ou converter a lógica pra WS2812/endereçável se decidir não usar DMX de
-      verdade).
+- [ ] Comprar e testar o hardware de LED real: MAX485 + decoder DMX RGBW pros 4
+      focos de canto, level shifter 74HCT245 pro anel WS2812B do cronômetro (opções
+      já pesquisadas e documentadas na seção 7).
 - [ ] Cablagem física da arena (2 zonas, conectores XLR, terminador 120Ω).
 - [ ] Testar a leitura dos 6 botões com debounce.
 - [ ] **Placa ESP32 nova necessária**: a JVTECH LoRa disponível está em uso pelo
@@ -542,7 +683,109 @@ de assumir.
 
 ---
 
-## 7. Guia de setup num computador novo
+## 7. Conectar fitas de LED no ESP32 — opções pesquisadas
+
+O projeto usa dois tipos de LED diferentes, com abordagens de conexão bem
+distintas. Pesquisado em 2026-08-25, com fontes abaixo.
+
+### 7.1 Fitas endereçáveis (WS2812B / NeoPixel) — pro anel do cronômetro (seção 4.8)
+
+É o caso do anel/barra de LED que mostra o tempo restante visualmente. Cada pixel é
+endereçado individualmente por 1 fio de dado digital.
+
+**Nível lógico (o ponto mais importante):** o ESP32 opera em lógica de **3,3V**, mas
+o datasheet do WS2812B pede **5V** no pino de dado. Fitas curtas (poucos LEDs, fio
+curto) às vezes funcionam direto do GPIO sem nada a mais, mas não é confiável —
+recomendação séria é usar um **level shifter** (deslocador de nível) de 3,3V→5V:
+- **74HCT245** — opção mais citada e recomendada para WS2812B.
+- **74AHCT125** — alternativa, a versão 14-PDIP é mais fácil de usar em protoboard.
+- **TS5A3160** (chave analógica) também funciona como level shifter simples pra
+  esse caso.
+
+**Capacitor de desacoplamento:** ligar um capacitor de **100µF a 1000µF** entre
+V+ e GND, o mais perto fisicamente possível do primeiro LED da fita — amortece o
+pico de corrente inicial e estabiliza a alimentação.
+
+**Resistor na linha de dado:** um resistor de **220 a 470Ω** em série entre o pino
+de dado do ESP32 (ou a saída do level shifter) e o `DIN` do primeiro LED — reduz
+reflexão de sinal e evita que o primeiro LED "trave" com dado corrompido.
+
+**Alimentação externa e injeção de energia:** WS2812B consome até ~60mA por LED em
+branco pleno — pra qualquer fita com mais que uns poucos LEDs, alimentação vinda do
+próprio ESP32 (5V da USB) não é suficiente. Usar fonte externa de 5V dimensionada
+pelo número de LEDs, e para fitas longas (60+ LEDs / mais de 1 metro), **injetar
+alimentação a cada 1-2 metros** (levar fio de V+ e GND direto da fonte até pontos
+intermediários da fita, não só nas pontas) — sem isso os LEDs do fim da fita ficam
+mais escuros e puxam pro amarelo/vermelho por queda de tensão no cobre da própria
+fita.
+
+**Terra comum:** o GND do ESP32, do level shifter e da fonte externa da fita
+precisam estar todos interligados.
+
+**Biblioteca:** `FastLED` ou `Adafruit_NeoPixel`, ambas maduras e com bom suporte a
+ESP32 (usam a periferia RMT do chip, que é feita sob medida pra esse tipo de
+protocolo de timing rígido).
+
+### 7.2 Fitas RGBW não-endereçáveis via DMX512 — pros 4 focos de canto (seção 4.7)
+
+Diferente das WS2812B, os focos de canto do projeto são pensados como fixtures
+DMX512 comuns (RGBW, controladas por canal, não pixel a pixel). Duas peças:
+
+**1. Do ESP32 pro barramento DMX — transceiver RS-485:**
+O DMX512 roda fisicamente sobre RS-485, então o ESP32 precisa de um chip
+transceiver entre a UART dele e o cabo XLR:
+- **MAX485** (ou equivalente SN75176) — opção padrão, citada em praticamente todo
+  projeto ESP32+DMX. Muitos desses chips são tolerantes a 3,3V, então costumam ligar
+  direto nos pinos UART do ESP32 sem level shifter.
+- Bibliotecas prontas pra ESP32: **`esp_dmx`** (Espressif, implementação completa
+  do padrão ANSI-ESTA E1.11, inclusive perfil "Four-address RGBW" pronto pra esse
+  caso de uso) e **`ESP32-DMX`** (luksal), que já traz exemplos de RX e TX com
+  MAX485 (GPIO16 = RX, GPIO17 = TX, mais 1 GPIO extra pra alternar direção do
+  barramento).
+
+**2. Do barramento DMX pra fita RGBW de verdade — decoder/driver:**
+O MAX485 só coloca o sinal DMX no cabo; ainda precisa de um **decoder DMX512** que
+recebe esse sinal e converte em PWM pra alimentar a fita RGBW de fato (o ESP32 não
+tem potência pra acionar a fita direto). Módulos prontos e comerciais, todos com
+entrada 12-24V DC e interface RJ45 ou XLR pro DMX:
+- Decoders de **4 canais RGBW** (ex.: linha GIDERWEL, AMKI, Superlight) — cada canal
+  aguenta ~4-5A, dá pra acionar 1 fixture RGBW de bom tamanho por decoder.
+- Decoders de **12 canais**, pra quem quiser controlar vários grupos de fita a
+  partir do mesmo módulo (~720W em 12V ou 1440W em 24V de capacidade total).
+
+Fluxo completo: **ESP32 (esp_dmx) → MAX485 → cabo XLR com terminador 120Ω →
+decoder DMX RGBW → fita/fixture RGBW de 12V ou 24V**. Esse caminho é o que já está
+documentado no design do projeto (seção 4.2) e é o recomendado pros 4 focos de
+canto, porque mantém os focos endereçáveis individualmente por canal DMX (essencial
+pro esquema de "lado azul" vs "lado vermelho" da seção 4.7) sem precisar de
+protocolo de pixel.
+
+### 7.3 Qual usar onde
+
+| Peça do projeto | Tipo de LED | Conexão recomendada |
+|---|---|---|
+| 4 focos de canto (seção 4.7) | Fixture RGBW comum, controlada por canal | ESP32 → MAX485 → DMX512 → decoder RGBW → fixture |
+| Anel/barra do cronômetro (seção 4.8) | Fita endereçável WS2812B/NeoPixel | ESP32 (GPIO livre) → level shifter 74HCT245 → resistor 330Ω → fita, com capacitor no início e alimentação externa injetada a cada 1-2m |
+
+Os dois sistemas são fisicamente independentes (não compartilham o mesmo barramento
+de dados), mas podem ser controlados pelo mesmo ESP32 — o chip tem UARTs e GPIOs de
+sobra pra fazer as duas coisas ao mesmo tempo (já mapeado na arquitetura da seção
+4.2).
+
+**Sources:**
+- [WS2812b and logic level shifters (Arduino Forum)](https://forum.arduino.cc/t/ws2812b-and-logic-level-shifters/570728)
+- [fast and accurate 3.3V to 5V level shifter for NeoPixel (All About Circuits)](https://forum.allaboutcircuits.com/threads/fast-and-accurate-3-3v-to-5v-level-shifter-for-neopixel-addressable-led-ws2812b-wled-esp32-project-needed.207614/)
+- [WS2812 Breakout Hookup Guide (SparkFun)](https://learn.sparkfun.com/tutorials/ws2812-breakout-hookup-guide/hardware-hookup)
+- [Guide for WS2812B Addressable RGB LED Strip with Arduino (Random Nerd Tutorials)](https://randomnerdtutorials.com/guide-for-ws2812b-addressable-rgb-led-strip-with-arduino/)
+- [Ultimate Guide: Controlling WS2812B Addressable LEDs with Arduino (Last Minute Engineers)](https://lastminuteengineers.com/ws2812b-arduino-tutorial/)
+- [esp_dmx: Espressif ESP32 implementation of DMX-512A/RDM (GitHub)](https://github.com/someweisguy/esp_dmx)
+- [luksal/ESP32-DMX: example code for RX/TX DMX512 with MAX485 (GitHub)](https://github.com/luksal/ESP32-DMX)
+- [DMX512-4DP Decoder: 4-Channel DC12-24V RGBW LED Controller (Superlight)](https://www.superlightingled.com/dc1224v-4-channel-dmx512-decoder-for-led-controller-building-lighting-p-1841.html)
+- [GIDERWEL 12 Channel DMX Decoder RGB Controller (Amazon)](https://amazon.com/Channel-Decoder-DMX512-Controller-DC5V-24V/dp/B07BVLXWD9)
+
+---
+
+## 8. Guia de setup num computador novo
 
 **Testado com sucesso em duas migrações de máquina** (a mais recente, em
 2026-08-25, terminou com dois ciclos completos de START→FORFEIT rodando contra o
@@ -586,7 +829,7 @@ site real, salas `CVRU` e `VYYA`).
 
 ---
 
-## 8. Preferências de trabalho do Erik
+## 9. Preferências de trabalho do Erik
 
 - Responder em **português**.
 - Fundamentar decisões de design em fontes reais (regras oficiais) em vez de
