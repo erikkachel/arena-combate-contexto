@@ -5,7 +5,15 @@ Claude, mais uma sessão de migração para um novo computador. É a fonte de ve
 única do projeto — cole este arquivo inteiro numa conversa nova do Claude pra
 retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
-Última atualização: 2026-08-25.
+Última atualização: 2026-08-26.
+
+> **Nota (2026-08-26):** o Erik enviou fotos de hardware (botão de emergência
+> cogumelo Metaltex, luminárias de LED) junto com um print de uma conversa de
+> WhatsApp que explicaria a decisão de uso — mas o arquivo de imagem da conversa
+> chegou corrompido (46px de largura, ilegível) e não pôde ser lido. O que consta
+> na seção 4.6 sobre esses componentes é só o que dá pra confirmar pelas fotos dos
+> objetos em si (specs físicas/elétricas) — a decisão de qual botão vai em qual
+> função do design **ainda não está confirmada**, ver aviso destacado naquela seção.
 
 > **Nota de correção (2026-08-25):** circulou uma versão de diagrama (mermaid.live)
 > com um estado **"EMPATE"** e um estado **"NOCAUTE"** separados, faltando
@@ -578,6 +586,34 @@ embutido no botão, em vez de precisar de seleção separada.
 | K.O. — AZUL | declara nocaute, vencedor azul — pula direto pra `finalized` |
 | K.O. — VERMELHO | declara nocaute, vencedor vermelho — pula direto pra `finalized` |
 | ENCERRAR | força o fim do round, entra em `scoring` |
+
+**Peça física candidata (fotografada em 2026-08-26, decisão ainda não confirmada em
+texto):** botão de emergência cogumelo **Metaltex `P20AKR-R-1B`** — vermelho, contato
+**1NF** (normalmente fechado — abre quando pressionado), trava e gira pra destravar,
+cabeça Ø40mm / corpo Ø30mm / altura 31,5mm, furação de fixação em padrão quadrado
+40×40mm (4 furos). Já existe pelo menos 1 unidade em mãos, e nas fotos aparece
+também já montada/cabeada num gabinete metálico com um conector tipo flat cable —
+possivelmente reaproveitado de outro equipamento, só pra ilustrar a montagem física,
+não necessariamente já cabeado pro ESP32 deste projeto.
+> **Importante pro firmware, se for usar este modelo:** por ser contato **NF**
+> (normally closed), a lógica de leitura no ESP32 é invertida em relação a um botão
+> comum NA — o pino lido fica em nível alto (circuito fechado) em repouso e vai a
+> nível baixo (circuito aberto) quando pressionado, ou o contrário dependendo de
+> como for cabeado ao GND/pull-up. Testar com multímetro antes de assumir a polaridade.
+>
+> **Não confirmado ainda:** pra qual dos 6 botões do design (K.O.-azul, K.O.-vermelho,
+> pausar/retomar, encerrar, ou os 2 de competidor) esse modelo específico vai ser
+> usado — a conversa que explicava essa escolha veio como uma imagem corrompida (ver
+> nota de rodapé desta seção) e não pôde ser lida. O formato "cogumelo" (grande,
+> robusto, vermelho, trava-e-gira) é tipicamente usado como botão de emergência/parada,
+> o que sugere um bom encaixe pros botões de K.O. ou ENCERRAR, mas isso precisa ser
+> confirmado com o Erik antes de fechar a especificação de compra.
+>
+> Também foram fotografadas 4 luminárias de LED retangulares tipo painel/plafon
+> (não fita endereçável) numa cesta com outros materiais soltos — não ficou claro
+> se são candidatas a substituir os focos de canto RGBW da seção 4.7, ou se são só
+> iluminação geral do ambiente sem relação com o controlador DMX. Também precisa
+> confirmação.
 
 #### Juízes — decisão: ficam no celular
 
