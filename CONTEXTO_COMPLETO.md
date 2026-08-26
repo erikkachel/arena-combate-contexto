@@ -7,13 +7,11 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
 Última atualização: 2026-08-26.
 
-> **Nota (2026-08-26):** o Erik enviou fotos de hardware (botão de emergência
-> cogumelo Metaltex, luminárias de LED) junto com um print de uma conversa de
-> WhatsApp que explicaria a decisão de uso — mas o arquivo de imagem da conversa
-> chegou corrompido (46px de largura, ilegível) e não pôde ser lido. O que consta
-> na seção 4.6 sobre esses componentes é só o que dá pra confirmar pelas fotos dos
-> objetos em si (specs físicas/elétricas) — a decisão de qual botão vai em qual
-> função do design **ainda não está confirmada**, ver aviso destacado naquela seção.
+> **Atualização (2026-08-26): conversa com o Berken (colega no projeto) lida na
+> íntegra.** Resolve a dúvida anterior sobre o botão cogumelo e traz informação
+> nova e importante sobre a escala real do projeto — **são 3 arenas, não 1** — e
+> sobre uma integração via API do tapout.gg em andamento. Ver seção 2a (escala e
+> logística) e a seção 4.6 atualizada (botão do competidor confirmado).
 
 > **Nota de correção (2026-08-25):** circulou uma versão de diagrama (mermaid.live)
 > com um estado **"EMPATE"** e um estado **"NOCAUTE"** separados, faltando
@@ -30,6 +28,7 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
 1. [Visão geral do projeto](#1-visão-geral-do-projeto)
 2. [Sistema 1: botão físico → judge.tapout.gg (`tapout-forfeit-trigger`)](#2-sistema-1-botão-físico--judgetapoutgg)
+   - [2a. Escala do projeto, orçamento e logística do evento](#2a-escala-do-projeto-orçamento-e-logística-do-evento)
 3. [Mapa de comportamento real do site judge.tapout.gg](#3-mapa-de-comportamento-real-do-site-judgetapoutgg)
 4. [Sistema 2: controlador de iluminação DMX512 da arena](#4-sistema-2-controlador-de-iluminação-dmx512-da-arena)
    - [4.4a Diagrama visual corrigido (fluxo completo)](#44a-diagrama-visual-corrigido-fluxo-completo)
@@ -182,6 +181,107 @@ python watch_button.py
   com erro no Gerenciador de Dispositivos (sem porta COM), baixar o instalador oficial
   em silabs.com (`CP210x_Windows_Drivers.zip`, contém `CP210xVCPInstaller_x64.exe`) e
   instalar. Depois disso o Windows já reconhece a porta COM automaticamente.
+
+---
+
+## 2a. Escala do projeto, orçamento e logística do evento
+
+Informação extraída de uma conversa de WhatsApp entre Erik e **Berken** (colega
+trabalhando no projeto junto), lida na íntegra em 2026-08-26. Cobre pontos que não
+tinham aparecido em nenhum documento anterior.
+
+### 2a.1 São 3 arenas, não 1
+
+Todo o design documentado nas seções 3-6 deste arquivo foi pensado pra **1 arena**.
+Na prática, o evento vai ter **3 arenas simultâneas**. Berken perguntou "vão ser
+quantas arenas total?" e Erik confirmou: **3**. Isso significa que, quando o
+firmware/hardware do Sistema 2 (iluminação) estiver pronto, ele precisa ser
+replicável 3x — o design em si não muda, mas a lista de compras e o tempo de
+montagem sim.
+
+Cada arena precisa do seu próprio ESP32 pro Sistema 1 (botão de partida). Erik:
+"como o esp é meio barato, eu pegaria uns 2 por arena" — ou seja, **2 ESP32 por
+arena** (redundância/sobressalente, já que a placa é barata), **6 ESP32 no total**
+só pro Sistema 1. Ainda não fechado quantos ESP32 adicionais o Sistema 2
+(iluminação DMX) vai precisar por arena — depende do design final do firmware
+único (seção 4.2).
+
+Há uma 3ª pessoa, **André**, dona/responsável por uma dessas arenas — Erik mandou
+mensagem pra confirmar os specs da arena dele, resposta ainda pendente no momento
+da conversa. **Antes de fechar a lista de compras de ESP32, confirmar com o André.**
+
+### 2a.2 Orçamento — sem valor fixo, minimizar gasto
+
+Não existe um orçamento fechado. Berken tentou orçar mas achou difícil sem ver
+preços na loja; Erik pediu pra "tentar ter bom senso e gastar o mínimo possível".
+Guias que emergiram da conversa:
+- **O botão do competidor foi o item mais caro até agora** (~R$40 e poucos reais
+  cada, 2 unidades já compradas) — e é o componente que **"não pode dar errado"**
+  (maior exigência de confiabilidade do sistema todo).
+- Pro resto (placa perfurada, ESP32s, fio, LEDs), a ideia é gastar o mínimo
+  necessário, sem economias que comprometam confiabilidade.
+- **Iluminação nova não é prioridade.** Uma das arenas ("arena da wicked" — de
+  outro grupo/dono) já veio com um kit pronto: 4 luminárias de LED tipo
+  painel/plafon + parafusos + cintas + material de fixação (foto: "Isso é o que
+  veio com a arena da wicked"). Berken perguntou se não valeria a pena fazer
+  iluminação nova; Erik respondeu que **não**: "Não vou gastar 1 centavo a mais do
+  que o necessário na arena deles" — e o material que veio com aquela arena
+  **precisa ficar com os donos dela** ("tem q deixar tudo com eles"), não é do
+  Erik pra reaproveitar livremente nas outras arenas.
+- As fitas de LED endereçável que já foram compradas por Erik "acharam meio
+  fracas" — pode precisar trocar por LED mais forte. Mas **não é bloqueante**: "no
+  ano passado não tinha nenhum LED e deu certo" — ou seja, o evento já rodou sem
+  nenhuma iluminação especial antes, então o Sistema 2 (DMX/iluminação) é uma
+  melhoria desejável, não um requisito crítico pra o evento acontecer.
+
+### 2a.3 Integração via API do tapout.gg em andamento (Barreto)
+
+Ponto potencialmente importante pro futuro do Sistema 2: Erik mencionou que falou
+com uma pessoa chamada **Barreto** sobre a "integração do tapout" — Barreto disse
+que **até o fim do fim de semana ele faz a API de integração**. Não há mais
+detalhes na conversa sobre o que essa API expõe.
+
+**Isso pode mudar a abordagem técnica documentada nas seções 3.6 e 4.5** (que hoje
+descrevem ler o `phase`/cronômetro/placar via texto visível na tela, accessibility
+tree, porque não se sabia se existiam `data-testid` dedicados) — se o Barreto
+entregar uma API de verdade, o script leitor do Sistema 2 poderia consumir eventos
+estruturados em vez de fazer scraping de DOM, o que seria mais robusto. **Vale
+confirmar com o Erik/Barreto o que essa API oferece antes de investir tempo
+implementando o parsing por accessibility tree.**
+
+### 2a.4 Botão físico dos juízes pra pausa de urgência (ideia nova)
+
+Berken sugeriu: "É bom ter um botão que os juízes possam usar pra pausar a luta" —
+"Não sei se seria só pelo tapout com o celular, acho que seria bom pensar em algo
+físico mais 'pra urgência'". Berken disse que ia procurar vídeos/referências de
+como a arena oficial da RoboCore faz isso. **Não estava no design anterior**
+(seção 4.6 documenta só os 4 botões centrais operados pelo árbitro principal,
+sem um botão de pausa dedicado aos juízes) — é uma ideia em aberto, não uma
+decisão fechada.
+
+### 2a.5 Transmissão ao vivo e câmeras (fora do escopo do ESP32, mas parte do evento)
+
+- Cada arena vai ter webcam. **2 das 3 arenas** vão ficar com um iPhone em live
+  aberta, sem interface nenhuma na tela, transmitindo a imagem pra quem está na
+  **3ª arena** conseguir acompanhar as outras duas.
+- Preocupação: iPhone pode sofrer com **superaquecimento** em uso prolongado como
+  câmera de transmissão contínua ("tem q ficar esperto que vai dar overheat e o
+  iphone vai desligar"). Alternativa considerada: câmera de ação tipo GoPro com
+  ventosa, que é o mais comum pra esse uso (gravar de cima pra estudar/treinar
+  depois).
+- Erik também quer uma câmera fixa **de cima**, apontando pra baixo, gravando as
+  lutas — motivo: quer montar um **heatmap** de dados das lutas, potencialmente
+  reaproveitável pro projeto pessoal do TCC do Erik (fazer um robô 100% autônomo
+  competitivo — "meu sonho ano que vem é competir sem competir... eu largo o robô
+  na mão de alguém e peço só pra ligar ele na arena. Aí ele luta sozinho."). Esse
+  objetivo pessoal é uma motivação de fundo, não faz parte do escopo de entrega
+  do projeto da arena em si.
+- Ângulo de câmera preferido: **meio próximo** ("nem muito de longe"); câmera fixa
+  é melhor que rolando se não der pra ter alguém dedicado filmando.
+- A transmissão pausa no horário de almoço e reabre quando a operação volta.
+- Ainda precisa resolver: onde gravar (notebook dedicado, o mesmo PC que roda o
+  tapout, ou o notebook do Berken) e, se for webcam com cabo curto (1-1,5m), talvez
+  precise de um **extensor USB**.
 
 ---
 
@@ -575,6 +675,49 @@ pronto e só entra no site quando os dois batem. Isso também muda o `forfeit.mj
 hoje ele desiste sempre de `--team blue` fixo; precisa aceitar qual lado desistiu
 dinamicamente, dependendo de qual botão foi apertado.
 
+**Peça física confirmada (decisão fechada com o Berken, 2026-08-26):** botão de
+emergência cogumelo **Metaltex `P20AKR-R-1B`** — vermelho, **trava ao pressionar,
+gira pra destravar/soltar**, cabeça Ø40mm, base de fixação padrão industrial 22mm
+(furação quadrada 40×40mm). Produto:
+`https://metaltex.com.br/products/p20-botao-de-comando-plastico-22mm-botao-de-emergencia-p20-plastico-22mm`.
+**2 unidades já compradas**, ~R$40 e poucos reais cada — item mais caro do
+orçamento até agora, e o que "não pode dar errado" (maior exigência de
+confiabilidade do projeto).
+
+**Por que esse modelo específico, e não um botão simples:** Erik e Berken debateram
+usar uma botoeira industrial comum (momentânea, sem retenção) vs. esse modelo
+trava-e-gira, e fecharam no trava-e-gira de propósito. A lógica combinada:
+- **Pressionar e travar** o botão = sinaliza "pronto" antes da luta — o competidor
+  mantém o botão travado (pressionado) durante toda a luta como indicador visual
+  contínuo de que está "no jogo".
+- **Girar pra destravar/soltar** = aciona a desistência — uma ação física
+  deliberada de 2 movimentos (girar + soltar), que não acontece por acidente.
+- Motivo explícito do Erik: *"eu achei mais importante garantir que não teria uma
+  desistência não desejada"* — como o botão precisa ser girado (não só tocado) pra
+  destravar, **não tem como a pessoa contestar** uma desistência alegando que foi
+  sem querer ("esbarrar assim pra desistir sem querer tem que ser muito burro").
+  Sendo contato físico puro (sem transistor/lógica intermediária), também não há
+  espaço pra alegar "ruído" ou falha eletrônica causando a desistência.
+- A preocupação real do Erik não é o competidor esbarrar sem querer, e sim
+  **ruído elétrico/interferência de sinal ou bug no código do ESP32** gerando um
+  falso positivo — por isso o firmware deve ter um **micro-delay de debounce** na
+  leitura do pino (ideia do Berken, ainda a implementar).
+- **Ideia considerada, não fechada:** usar os **2 blocos de contato** que esse
+  modelo de botão aceita (1 NA + 1 NF simultaneamente) pra fazer validação
+  redundante de sinal — ler os dois contatos e exigir que os dois concordem (lógica
+  AND) antes de aceitar o evento como válido, reduzindo ainda mais a chance de
+  falso positivo por ruído. Erik ponderou que a preocupação normal de "corrente
+  que o bloco aguenta" não se aplica aqui porque o sinal vai ser 5V/miliamperes
+  (lógica digital), não uma carga de quadro elétrico — então o único motivo pra
+  adicionar o segundo bloco seria mesmo a validação redundante de sinal, não
+  capacidade de corrente.
+- **Contato usado:** conforme a caixa do produto fotografada, o código
+  `P20AKR-R-1B` corresponde ao contato **1NF** (normalmente fechado — abre quando
+  travado/pressionado), mas o Berken mencionou em texto pretender configurar
+  "normalmente aberto" — **checar com multímetro antes de fixar a lógica de
+  polaridade no firmware**, pode haver contradição entre o código de compra e o
+  bloco de contato efetivamente instalado/desejado.
+
 #### Grupo 2 — Central / árbitro principal (4 botões)
 
 As 4 ações que hoje só o admin do site consegue disparar. K.O. já vem com o lado
@@ -587,33 +730,18 @@ embutido no botão, em vez de precisar de seleção separada.
 | K.O. — VERMELHO | declara nocaute, vencedor vermelho — pula direto pra `finalized` |
 | ENCERRAR | força o fim do round, entra em `scoring` |
 
-**Peça física candidata (fotografada em 2026-08-26, decisão ainda não confirmada em
-texto):** botão de emergência cogumelo **Metaltex `P20AKR-R-1B`** — vermelho, contato
-**1NF** (normalmente fechado — abre quando pressionado), trava e gira pra destravar,
-cabeça Ø40mm / corpo Ø30mm / altura 31,5mm, furação de fixação em padrão quadrado
-40×40mm (4 furos). Já existe pelo menos 1 unidade em mãos, e nas fotos aparece
-também já montada/cabeada num gabinete metálico com um conector tipo flat cable —
-possivelmente reaproveitado de outro equipamento, só pra ilustrar a montagem física,
-não necessariamente já cabeado pro ESP32 deste projeto.
-> **Importante pro firmware, se for usar este modelo:** por ser contato **NF**
-> (normally closed), a lógica de leitura no ESP32 é invertida em relação a um botão
-> comum NA — o pino lido fica em nível alto (circuito fechado) em repouso e vai a
-> nível baixo (circuito aberto) quando pressionado, ou o contrário dependendo de
-> como for cabeado ao GND/pull-up. Testar com multímetro antes de assumir a polaridade.
->
-> **Não confirmado ainda:** pra qual dos 6 botões do design (K.O.-azul, K.O.-vermelho,
-> pausar/retomar, encerrar, ou os 2 de competidor) esse modelo específico vai ser
-> usado — a conversa que explicava essa escolha veio como uma imagem corrompida (ver
-> nota de rodapé desta seção) e não pôde ser lida. O formato "cogumelo" (grande,
-> robusto, vermelho, trava-e-gira) é tipicamente usado como botão de emergência/parada,
-> o que sugere um bom encaixe pros botões de K.O. ou ENCERRAR, mas isso precisa ser
-> confirmado com o Erik antes de fechar a especificação de compra.
->
-> Também foram fotografadas 4 luminárias de LED retangulares tipo painel/plafon
-> (não fita endereçável) numa cesta com outros materiais soltos — não ficou claro
-> se são candidatas a substituir os focos de canto RGBW da seção 4.7, ou se são só
-> iluminação geral do ambiente sem relação com o controlador DMX. Também precisa
-> confirmação.
+**Ideia nova, não fechada (surgiu na conversa com o Berken, 2026-08-26):** um botão
+físico dedicado pros **juízes** pausarem a luta em caso de urgência/emergência real
+(diferente do fluxo normal via Tapout/celular) — ver seção 2a.4. Se confirmado,
+seria um 7º botão físico, fora da contagem de 6 já fechada abaixo.
+
+**Luminárias já em mãos (não confirmado se substituem os focos de canto):** 4
+luminárias de LED tipo painel/plafon vieram junto com o kit da "arena da wicked"
+(outro grupo/dono de arena) — ver seção 2a.2. Decisão tomada: **não construir
+iluminação nova pra aquela arena específica**, reaproveitando o que já veio com
+ela. Não ficou claro se esse tipo de luminária (painel fixo, não RGBW endereçável
+por canal) é compatível com o design DMX512 da seção 4.3-4.7, ou se serve só como
+iluminação geral de ambiente sem relação com o controlador de estados.
 
 #### Juízes — decisão: ficam no celular
 
@@ -634,11 +762,12 @@ dano) usado em revezamento pelos 3 seria bem mais barato que 45 botões.
 | Competidores (azul, vermelho) | 2 |
 | Central (pausar/retomar, k.o.-azul, k.o.-vermelho, encerrar) | 4 |
 | Juízes | 0 — ficam no celular |
-| **Total** | **6** |
+| **Total** | **6** (possivelmente 7, se o botão de pausa de urgência dos juízes — seção 2a.4 — for confirmado) |
 
 **Não testável com o hardware atual**: o ESP32 disponível tem só 1 botão onboard.
 Mesmo esse escopo reduzido de 6 botões exige uma placa com mais GPIOs livres antes de
-gravar e testar de verdade.
+gravar e testar de verdade. **E são 3 arenas** (seção 2a.1) — o design é o mesmo,
+mas a lista de compras/montagem precisa ser multiplicada por 3.
 
 ### 4.7 Iluminação — mapeamento físico dos 4 focos de canto (decisão recente)
 
@@ -692,26 +821,58 @@ real (seção 3), várias coisas mudaram:
 
 - [ ] Reescrever `forfeit.mjs` pra aceitar qual time desistiu dinamicamente (não
       mais `--team blue` fixo) — pré-requisito pro design de botão duplo do Sistema 2.
+- [ ] **Confirmar com o André** os specs da arena dele antes de fechar a lista de
+      compras de ESP32 (seção 2a.1) — mensagem já enviada, resposta pendente.
+- [ ] Comprar os ESP32 pro Sistema 1: 2 por arena × 3 arenas = 6 unidades (mais os
+      que o Sistema 2 precisar, ainda não fechado).
 
 ### Sistema 2 (controlador DMX512)
 
+- [ ] **Confirmar com o Barreto o que a API de integração do tapout.gg vai expor**
+      (prometida pra até o fim do fim de semana, seção 2a.3) — pode substituir toda
+      a abordagem de leitura por accessibility tree das seções 3.6/4.5 por chamadas
+      de API estruturadas, o que seria bem mais robusto. Vale esperar essa resposta
+      antes de investir tempo grande no script leitor por DOM.
 - [ ] Atualizar o artifact "Controlador da Arena" incorporando o conteúdo já
       reconciliado deste documento (a versão publicada ainda tem algumas lacunas
       textuais menores em relação ao que está escrito aqui).
 - [ ] Abrir DevTools no site e confirmar se fase/cronômetro/placar têm `data-testid`
-      dedicado, do jeito que foi feito pro `forfeit.mjs` original (ver 3.6 e 4.5).
+      dedicado, do jeito que foi feito pro `forfeit.mjs` original (ver 3.6 e 4.5) —
+      só necessário se a API do Barreto não resolver isso primeiro.
 - [ ] Escrever o firmware ESP32 (biblioteca `esp_dmx` ou `Conceptinetics`) que
       implementa os 8 estados + sub-estado descritos.
+- [ ] Implementar o debounce/validação de sinal do botão de competidor (seção 4.6,
+      Grupo 1) — Erik está mais preocupado com ruído/bug de firmware causando falso
+      positivo do que com o competidor esbarrar sem querer.
+- [ ] Decidir se vale usar os 2 blocos de contato (NA+NF) do botão cogumelo pra
+      validação redundante de sinal (ideia do Berken, seção 4.6) — checar com
+      multímetro qual contato foi de fato instalado antes de fixar a polaridade no
+      firmware.
+- [ ] Avaliar se as 4 luminárias de painel/plafon que vieram com a "arena da wicked"
+      são compatíveis com o design DMX512, ou se ficam só como iluminação geral
+      dessa arena específica sem integração com o controlador (seção 4.6/2a.2).
 - [ ] Comprar e testar o hardware de LED real: MAX485 + decoder DMX RGBW pros 4
       focos de canto, level shifter 74HCT245 pro anel WS2812B do cronômetro (opções
-      já pesquisadas e documentadas na seção 7).
-- [ ] Cablagem física da arena (2 zonas, conectores XLR, terminador 120Ω).
-- [ ] Testar a leitura dos 6 botões com debounce.
+      já pesquisadas e documentadas na seção 7) — **lembrando que iluminação nova
+      não é prioridade/bloqueante** (seção 2a.2: o evento já rodou sem isso antes).
+- [ ] Cablagem física da arena (2 zonas, conectores XLR, terminador 120Ω) — ×3
+      arenas.
+- [ ] Testar a leitura dos 6-7 botões com debounce.
 - [ ] **Placa ESP32 nova necessária**: a JVTECH LoRa disponível está em uso pelo
       Sistema 1 e só tem 1 botão livre — qualquer design com mais botões físicos
       exige uma ESP32 DevKit comum (sem LoRa) antes de testar de verdade.
 - [ ] Nada do lado de luzes/DMX foi construído ainda — só o botão de desistência
       (Sistema 1) existe fisicamente.
+
+### Logística do evento (fora do ESP32, mas parte do projeto — seção 2a.5)
+
+- [ ] Decidir câmera pra transmissão das 2 arenas sem operador dedicado: iPhone
+      (risco de overheat) vs. GoPro com ventosa.
+- [ ] Resolver onde gravar a câmera de cima (heatmap): notebook dedicado, o PC do
+      tapout, ou o notebook do Berken — e se precisa de extensor USB.
+- [ ] Pesquisar como a arena oficial da RoboCore resolve o botão de pausa de
+      urgência dos juízes (ideia do Berken, seção 2a.4), antes de decidir se vira
+      um 7º botão físico do Sistema 2.
 
 Se for continuar o design/implementação da iluminação, começar perguntando o que
 Erik quer fazer a seguir (firmware, hardware, ajuste de alguma regra/estado) em vez
