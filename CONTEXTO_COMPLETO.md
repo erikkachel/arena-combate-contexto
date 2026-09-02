@@ -799,6 +799,101 @@ espectadores "+N LIVE" pode confundir parsers de texto ingênuos com a fase
 "live" da luta; duração do round não é pré-sugerida pela categoria
 escolhida.
 
+### 2d.3 Revisão externa: mandamos tudo pro Gemini criticar (2026-09-02)
+
+A chave de API do Gemini já estava configurada nesta máquina (de outro
+projeto do Erik, `PARA_NOVO_COMPUTADOR/6_gemini_check` — não tem relação
+com a arena, mas o script `check.mjs` de lá funciona sem depender de
+nenhuma dependência nova, só `fetch` nativo). Mandamos um resumo completo
+da metodologia e das conclusões das seções 2d.1/2d.2 pra ele criticar
+como revisor cético — **não** pra ele navegar no site (não tem essa
+capacidade), só analisar o que relatamos.
+
+**Pontos da crítica que aceitamos e corrigimos a redação:**
+- A conclusão de que a identidade do juiz "está amarrada a
+  localStorage/peer id" (seção 2d.7 do relatório antigo) era **especulação
+  não verificada** — não inspecionamos de fato o storage do navegador nem
+  o tráfego de rede. **Correção**: é só uma hipótese plausível, não um fato
+  confirmado.
+- A "janela de tolerância" de ~450ms depois do timer zerar (seção 2c/2d.2)
+  também é uma inferência, não uma causa comprovada — pode ser
+  dessincronia entre o timer visual e o real, ou o backend simplesmente
+  não validar timestamp pra desistência. **Correção**: sabemos que existe
+  uma folga pequena, não sabemos por quê.
+- **Cenários que realmente faltaram e não tínhamos testado** (a maioria
+  exige o hardware físico, que ainda não está montado): USB do ESP32
+  desconectando/reconectando no meio de uma luta, Wi-Fi caindo por alguns
+  segundos, o processo Chrome/Playwright travando ou saindo de memória, e
+  principalmente **ruído elétrico corrompendo uma linha na Serial** (ex:
+  duas linhas grudadas sem `\n` no meio, tipo `READY_BLUEREADY_RED`) — isso
+  não foi testado porque exige simular corrupção real de byte na UART, não
+  só concorrência de threads.
+- **Ponto mais importante da crítica**: nosso teste de "2 competidores ao
+  mesmo tempo" (seção 2d.2) só validou a trava (`lock`) em Python — **não**
+  testou o hardware real nem o site sob 2 cliques físicos simultâneos.
+  Continua sendo um gap real de cobertura, correto apontar isso.
+- O teste de 200 lutas (seção 2d.4, ver abaixo) testa só o **site**, sem
+  passar pela cadeia ESP32→Python→Node — outra cobertura parcial correta
+  de apontar.
+
+**Pontos da crítica que contestamos (informação que não tínhamos passado
+direito pro Gemini):**
+- Ele criticou que "depender do fechamento manual da janela pra liberar a
+  próxima luta elimina a automação sem intervenção humana" — isso é um
+  mal-entendido nosso na hora de explicar: a correção que fizemos foi o
+  processo **NÃO fechar sozinho** ao receber um comando extra (bug
+  antigo); e o `watch_arena.py` já **esquece a referência do processo
+  antigo** depois de um forfeit, então a PRÓXIMA luta sobe um processo/
+  browser **novo automaticamente**, sem esperar ninguém fechar a janela
+  anterior manualmente. A janela antiga só fica aberta de bônus, pra
+  conferência, sem bloquear nada.
+- A crítica sobre "requisições Playwright paralelas causando erro 500 no
+  site" não se aplica à nossa arquitetura real: o `watch_arena.py` já
+  serializa tudo com o `lock` **antes** de qualquer coisa chegar no
+  Playwright — nunca existem 2 ações simultâneas de verdade chegando no
+  site pelo nosso sistema, só uma de cada vez, uma atrás da outra.
+
+**Concordamos que a arquitetura tem uma cadeia longa de dependências**
+(ESP32 → Serial → Python → stdin → Node → Playwright → Chrome → site) e
+que o `match_logger.mjs` depender de uma classe CSS (`.pulse-dot`) pra
+achar a fase é frágil a mudanças de UI do site — já era uma limitação
+conhecida nossa (seção 2d), mas vale reforçar que é um ponto real de
+fragilidade, não só teórico.
+
+### 2d.4 Teste de estabilidade: 200 lutas seguidas na mesma sala
+
+Rodado com Playwright puro direto contra o site (sem passar pela cadeia
+ESP32/Python — testa só a resistência do site + da automação de UI, não a
+integração completa, conforme apontado pela crítica do Gemini acima).
+Script: `tests/stress_200_fights.mjs`. Alterna categoria (rotaciona as 7
+opções), nome dos competidores, método de encerramento (k.o./desistência)
+e vencedor, medindo o tempo de cada iteração pra detectar degradação.
+
+**Resultado: 200/200 sucesso, 0 falhas.** Duração média por luta: 4565ms.
+Média das 20 primeiras lutas: 4704ms. Média das 20 últimas: 4553ms —
+**degradação de -151ms (-3,2%)**, ou seja, ficou levemente **mais rápido**
+no final do que no início (provavelmente aquecimento normal do navegador
+nas primeiras iterações), **sem nenhum sinal de vazamento de memória ou
+lentidão progressiva** ao longo de 200 lutas seguidas na mesma sala/aba.
+Log completo em `Arenas/resultado_200_lutas.txt`.
+
+**Ressalva importante (levantada pela crítica do Gemini, seção 2d.3):**
+este teste passa só pelo **site**, via Playwright puro — não exercita a
+cadeia ESP32→Serial→Python→Node que o sistema físico usa de verdade. É
+uma evidência forte de que o *site* aguenta uso prolongado sem degradar,
+não uma prova de que a integração completa aguenta 200 lutas reais.
+
+### 2d.5 Correções adicionais depois da crítica do Gemini
+
+- `watch_arena.py`: linhas da Serial que não batem com nenhum comando
+  conhecido (possível ruído elétrico corrompendo a UART, apontado pela
+  crítica) agora são **logadas** (console + arquivo de validação) em vez
+  de silenciosamente ignoradas — não muda o comportamento, só dá
+  visibilidade se isso acontecer durante o evento real.
+- Corrigido um comentário desatualizado no cabeçalho do `watch_arena.py`
+  que ainda dizia que pausar/retomar "não é automatizado" (era verdade
+  antes da seção 2c.5, ficou desatualizado depois).
+
 ---
 
 ## 3. Mapa de comportamento real do site judge.tapout.gg
