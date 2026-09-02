@@ -7,13 +7,18 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
 Última atualização: 2026-09-02.
 
-> **🧾 Log de validação por luta (2026-09-02, ver seção 2d):** novo módulo
-> `match_logger.mjs`, separado da lógica principal, gera 1 `.txt` por luta
-> com todo input identificado (juízes, central/mouse, botões físicos) com
-> horário exato — testado com admin + 3 juízes reais, duração normal de
-> luta, cross-check linha a linha 100% correto (seção 2d.1). Um bug real
-> foi encontrado e corrigido nesse teste (fase `scoring` nunca era
-> detectada, confundida com a palavra "live" do contador de espectadores).
+> **🧾 Log de validação por luta + bateria extensa de testes (2026-09-02, ver
+> seção 2d):** novo módulo `match_logger.mjs`, separado da lógica
+> principal, gera 1 `.txt` por luta com todo input identificado (juízes,
+> central/mouse, botões físicos) com horário exato — testado com admin + 3
+> juízes reais, duração normal de luta, cross-check linha a linha 100%
+> correto (2d.1). Depois, uma segunda rodada (2d.2) testou limite de tempo
+> nos últimos instantes da luta, comandos fora de ordem, **3 lutas seguidas
+> na mesma sala** trocando nome/categoria (timer, desistência e K.O.), e o
+> caso dos 2 competidores apertando ao mesmo tempo (200/200 repetições sem
+> falha). Dois bugs reais encontrados e corrigidos nessa rodada toda. Lista
+> de falhas do lado do site (pra mandar pro Barreto) em
+> `Arenas/erros_e_falhas_tapout.txt`.
 
 > **✅ Validação extensa feita em 2026-08-27 (ver seção 2c):** lógica de
 > debounce simulada e testada (10/10), um bug real encontrado e corrigido no
@@ -717,6 +722,82 @@ chamadas de ferramenta separadas, foi usado um pequeno orquestrador
 o `forfeit.mjs` e fica observando um arquivo de "comandos" por polling,
 repassando pro stdin dele — permite mandar `START`/`FORFEIT`/`PAUSE` de
 chamadas de terminal separadas ao longo de um teste longo.
+
+### 2d.2 Segunda rodada de testes (2026-09-02, tarde): limite de tempo, ordem de comandos, múltiplas lutas, concorrência
+
+**Bug real encontrado e corrigido: `togglePause()` não esperava de verdade.**
+`locator.isVisible({timeout})` no Playwright **não espera** — é uma
+checagem instantânea do estado atual, mesmo aceitando um parâmetro de
+timeout (comportamento contraintuitivo da API, documentado oficialmente).
+Isso fazia o comando de pausar/retomar falhar como "não visível" se
+chegasse bem no início do round, ainda durante os ~4s de contagem
+regressiva. Corrigido pra usar `waitFor({state:'visible', timeout:
+TIMEOUT})`, que espera de verdade (mesmo padrão já usado pro botão de
+desistência).
+
+**Testes de limite de tempo (últimos instantes da luta):**
+- Desistência enviada ~2s antes do fim: funcionou normalmente.
+- Desistência enviada ~450ms **depois** do fim teórico do timer: ainda
+  funcionou — existe uma pequena janela de tolerância entre o timer chegar
+  a zero e a UI remover o botão de desistência (a fase real "scoring" já
+  tinha sido detectada pelo nosso log, mas o elemento ainda estava
+  clicável por uma fração de segundo).
+- Desistência enviada ~2s depois do fim, já com a fase de fato em
+  `scoring`: deu **timeout controlado** (configurável, não trava o
+  processo), com screenshot de erro salvo automaticamente — comportamento
+  correto e esperado.
+- Comando enfileirado durante a contagem regressiva ("starting"), testado
+  com timeout artificialmente curto (4s) só pra não gastar tempo: perdeu a
+  corrida por menos de 1 segundo. **Não é um problema real** — o timeout
+  padrão de produção é 60s, tempo de sobra pra qualquer corrida contra os
+  ~4s do countdown.
+
+**Comandos antes de qualquer luta iniciar e depois de pausar:** `PAUSE`
+enviado sem luta iniciada é ignorado com mensagem clara, igual já
+confirmado antes pro `FORFEIT`.
+
+**3 lutas seguidas na MESMA sala, trocando nome/categoria a cada uma,
+testando os 3 jeitos de terminar uma luta:**
+1. Fairyweight, "Formiga Atômica" vs "Aranha Mecânica", timer de 10s
+   esgotando naturalmente até `scoring`, consenso completo dos 3 juízes
+   (dano Menor×Trivial) → **finalizada por tempo**: "Formiga Atômica venceu
+   21×12".
+2. Hobbyweight (duração oficial 180s = 3min, conforme regra RoboCore),
+   "Titan de Aço" vs "Fúria Vermelha" → **finalizada por desistência**
+   (Fúria Vermelha desiste) → imediato, sem esperar os juízes, exatamente
+   como documentado.
+3. Lightweight, "Ciclone X9" vs "Predador 7" → **finalizada por K.O.**
+   (Ciclone X9 vence) → também imediato.
+
+Em todas as 3, o botão "nova luta nesta sala" funcionou perfeitamente, os
+mesmos 3 juízes permaneceram conectados nas 3 lutas sem precisar
+reconectar, e o histórico (`#/history`) mostrou corretamente "3 LUTAS"
+agrupadas por categoria (Fairyweight/Hobbyweight/Lightweight) — confirma
+que o site suporta bem esse fluxo de reaproveitar 1 sala pra várias lutas
+seguidas (o `forfeit.mjs` hoje não automatiza esse fluxo — sempre cria uma
+sala nova por luta — mas o site em si funciona perfeitamente se um dia
+quisermos automatizar isso).
+
+**Os dois competidores apertando desistência ao MESMO tempo:** testado com
+uma réplica exata da lógica de `lock` + `match_started` do
+`watch_arena.py`, usando threads Python reais (não simulação), incluindo
+200 repetições de chegada simultânea exata. Resultado: **sempre exatamente
+1 dos 2 é processado, o outro é ignorado com segurança — nunca trava, nunca
+manda os dois.** Em caso de empate físico exato, o time AZUL tende a ter
+uma leve vantagem de timing (o firmware do ESP32 checa o botão azul antes
+do vermelho em cada iteração do `loop()`), mas isso não é um problema —
+alguém sempre precisa "ganhar" esse tipo de corrida, e o sistema nunca fica
+em estado inconsistente.
+
+**Lista de erros/falhas do lado do SITE (não do nosso código) compilada
+separadamente** e enviada pro Erik em `Arenas/erros_e_falhas_tapout.txt`
+(pra mandar pro Barreto, autor do site). Principais pontos: juiz que
+desconecta não libera a vaga num prazo curto e não há como o admin liberar
+manualmente (sem botão de "remover juiz"); o texto de fase não tem
+`data-testid` (só o resto da tela tem, muito bem feito); o contador de
+espectadores "+N LIVE" pode confundir parsers de texto ingênuos com a fase
+"live" da luta; duração do round não é pré-sugerida pela categoria
+escolhida.
 
 ---
 
