@@ -10,7 +10,10 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 > **🧾 Log de validação por luta (2026-09-02, ver seção 2d):** novo módulo
 > `match_logger.mjs`, separado da lógica principal, gera 1 `.txt` por luta
 > com todo input identificado (juízes, central/mouse, botões físicos) com
-> horário exato — testado contra o site real, funcionando.
+> horário exato — testado com admin + 3 juízes reais, duração normal de
+> luta, cross-check linha a linha 100% correto (seção 2d.1). Um bug real
+> foi encontrado e corrigido nesse teste (fase `scoring` nunca era
+> detectada, confundida com a palavra "live" do contador de espectadores).
 
 > **✅ Validação extensa feita em 2026-08-27 (ver seção 2c):** lógica de
 > debounce simulada e testada (10/10), um bug real encontrado e corrigido no
@@ -657,11 +660,63 @@ Ligado por padrão; desligar com `node forfeit.mjs --no-log-validacao` (ou
 adicionando a flag no comando que o `watch_arena.py` usa pra subir o
 processo, se quiser desligar permanentemente).
 
-**Limitação conhecida:** a detecção de fase por polling de texto pode
-ocasionalmente pegar uma leitura "fora de ordem" no primeiro instante (ex:
-detectar `live` antes de `starting` num timing muito apertado) — é uma
-checagem best-effort sem `data-testid` de apoio, não 100% precisa
-milissegundo a milissegundo, mas captura todas as transições reais.
+### 2d.1 Teste completo com admin + 3 juízes reais (2026-09-02)
+
+Rodado com **duração normal de luta** (não encurtada), 3 abas de juízes
+reais entrando com nomes customizados, e cross-check linha a linha entre o
+que foi de fato clicado e o que o `.txt` registrou.
+
+**Bug real encontrado e corrigido nesse teste:** a transição pra fase
+`scoring` **nunca era detectada**. Causa: o header da tela do admin mostra
+"3/3 JUÍZES + 0 **LIVE**" (contador de espectadores) — como o detector de
+fase antigo procurava a primeira palavra da lista `['configuring',
+'starting', 'live', 'paused', ...]` que aparecesse em **qualquer lugar do
+texto da página inteira**, e "live" vem antes de "scoring" nessa lista, o
+contador de espectadores "enganava" o detector pra sempre reportar `live`,
+mesmo quando a fase real já tinha virado `scoring`. **Corrigido**: agora
+procura especificamente por um elemento com a classe `.pulse-dot` (o
+indicador visual "●") cujo texto seja uma fase válida — como existe mais de
+um `.pulse-dot` na página (o indicador de "online" da conexão também
+pisca), a busca varre **todos** os `.pulse-dot` até achar um cujo texto
+bata com uma fase conhecida, em vez de confiar no primeiro da DOM.
+
+**Resultado depois da correção**, testado 2x contra o site real:
+- Luta curta (10s) até estourar o tempo sozinha: `live → scoring` capturado
+  corretamente.
+- Luta com desistência simulada dentro do tempo: `configuring → starting →
+  live → scoring` completo, mais toda a sequência de hits e o clique de
+  desistência, tudo na ordem certa.
+
+**Cross-check feito manualmente** (o que eu cliquei vs. o que o `.txt`
+registrou), 100% de acerto:
+
+| O que foi feito de verdade | O que o log registrou |
+|---|---|
+| Nomes dos juízes (via `form_input`, sem resíduo de texto): Duque Vader, Princesa Leia, Han Solo | `juiz 1 · Duque Vader`, `juiz 2 · Princesa Leia`, `juiz 3 · Han Solo` — idênticos |
+| Nomes dos competidores via `--blue`/`--red`: Guerreiro Kappa, Destruidor Omega | Idênticos no cabeçalho do arquivo e no nome do arquivo |
+| Juiz 1: 2 cliques no vermelho | `0×0 → 0×1 → 0×2` |
+| Juiz 2: 4 cliques no azul | `0×0 → 1×0 → 2×0 → 3×0 → 4×0` |
+| Juiz 3: 1 clique azul + 2 cliques vermelho, nessa ordem | `0×0 → 1×0 → 1×1 → 1×2` — ordem exata preservada |
+| Comando `FORFEIT red` (simulando botão físico) em `--dry-run` | `abrir modal desistência → desistência selecionada: vermelho → cancelado` |
+
+**Achado extra (não intencional, mas valioso):** num teste anterior, o
+timer da luta expirou sozinho enquanto eu ainda estava testando os hits, e
+o comando `FORFEIT` chegou **depois** da fase já ter virado `scoring` — o
+botão "desistência" não existia mais na tela, e o script corretamente deu
+**timeout de 60s** (não travou pra sempre) com uma mensagem de erro clara e
+um screenshot automático (`forfeit-erro.png`). Isso reproduziu ao vivo
+exatamente o cenário de risco já documentado na seção 2c.7 — confirma que
+o comportamento de fallback (timeout controlado, não travamento) funciona
+como esperado nesse caso real.
+
+**Ferramenta usada pra esses testes** (não faz parte do projeto, só uma
+técnica de teste): como `forfeit.mjs --interactive` precisa ficar recebendo
+comandos ao longo do tempo, e não dá pra manter um pipe/shell aberto entre
+chamadas de ferramenta separadas, foi usado um pequeno orquestrador
+(`manual_session.mjs`, só no scratchpad da sessão, não versionado) que sobe
+o `forfeit.mjs` e fica observando um arquivo de "comandos" por polling,
+repassando pro stdin dele — permite mandar `START`/`FORFEIT`/`PAUSE` de
+chamadas de terminal separadas ao longo de um teste longo.
 
 ---
 
