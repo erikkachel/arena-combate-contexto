@@ -5,7 +5,12 @@ Claude, mais uma sessão de migração para um novo computador. É a fonte de ve
 única do projeto — cole este arquivo inteiro numa conversa nova do Claude pra
 retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
-Última atualização: 2026-08-27.
+Última atualização: 2026-09-02.
+
+> **🧾 Log de validação por luta (2026-09-02, ver seção 2d):** novo módulo
+> `match_logger.mjs`, separado da lógica principal, gera 1 `.txt` por luta
+> com todo input identificado (juízes, central/mouse, botões físicos) com
+> horário exato — testado contra o site real, funcionando.
 
 > **✅ Validação extensa feita em 2026-08-27 (ver seção 2c):** lógica de
 > debounce simulada e testada (10/10), um bug real encontrado e corrigido no
@@ -48,6 +53,7 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
    - [2a. Escala do projeto, orçamento e logística do evento](#2a-escala-do-projeto-orçamento-e-logística-do-evento)
    - [2b. 🚨 ESCOPO SIMPLIFICADO PRA SEXTA-FEIRA](#2b-escopo-simplificado-pra-sexta-feira-prioridade-máxima-atual)
    - [2c. ✅ Validação 2026-08-27 (firmware, integração, site, recuperação de juiz)](#2c-validação-feita-em-2026-08-27--lógica-do-firmware-integração-e-site-real)
+   - [2d. 🧾 Log de validação por luta (`match_logger.mjs`)](#2d-log-de-validação-por-luta-match_loggermjs)
 3. [Mapa de comportamento real do site judge.tapout.gg](#3-mapa-de-comportamento-real-do-site-judgetapoutgg)
 4. [Sistema 2: controlador de iluminação DMX512 da arena](#4-sistema-2-controlador-de-iluminação-dmx512-da-arena)
    - [4.4a Diagrama visual corrigido (fluxo completo)](#44a-diagrama-visual-corrigido-fluxo-completo)
@@ -590,6 +596,72 @@ Criada uma sala de teste e conectados 3 juízes reais (abas separadas) + uma
    "expande pra 3 juízes" simulando o consenso sem depender de rede entre
    dispositivos diferentes. Não depende de conexão nenhuma entre aparelhos,
    então esse tipo de problema não existe nesse modo.
+
+---
+
+## 2d. Log de validação por luta (`match_logger.mjs`)
+
+Módulo **separado**, adicionado a pedido do Erik pra servir de auditoria caso
+precise conferir depois o que aconteceu numa luta específica — **não altera
+a lógica principal** (todos os pontos de integração são protegidos por
+try/catch; se o log falhar por qualquer motivo, a automação real continua
+funcionando normalmente, só o arquivo de log fica incompleto/ausente).
+
+**Como funciona:** o Erik pediu que tudo fosse lido **direto do site**,
+mesmo ações feitas no mouse — então esse módulo não recebe eventos "de
+fora", ele instala observadores dentro da própria página (via
+`page.addInitScript`, que sobrevive a navegações — diferente de
+`page.evaluate`, que se perde no primeiro `goto()`):
+- **Listener de clique** nos botões do admin (criar luta, iniciar round,
+  pausar/retomar, k.o., desistência, confirmar/cancelar) — pega tanto
+  cliques do mouse quanto os que a própria automação faz, porque os dois
+  disparam eventos de DOM reais idênticos. Fonte registrada: `central
+  (site)`.
+- **`MutationObserver`** nos contadores de hits e no status de cada um dos
+  3 juízes (`admin-judge-N-hits`/`admin-judge-N-label`) — loga toda mudança
+  de valor. Fonte: `juiz 1`/`juiz 2`/`juiz 3`.
+- **Polling simples** (a cada 500ms) procurando as palavras de fase
+  conhecidas no texto da página — como a fase não tem `data-testid` (seção
+  3.6/4.5), essa é a forma mais robusta de pegar sem depender da estrutura
+  exata do DOM. Fonte: `site (fase)`.
+
+**Eventos dos botões físicos** (competidores + árbitro) são escritos pelo
+`watch_arena.py` no **mesmo arquivo**, já que o ESP32 não fala com o site
+diretamente — o Python só sabe qual arquivo usar através de um arquivo-
+ponteiro (`logs/.current_match_log`) que o `match_logger.mjs` atualiza toda
+vez que uma luta nova começa. Fonte: `botao competidor azul/vermelho` /
+`botao arbitro`.
+
+**1 arquivo `.txt` por luta**, nomeado com data/hora, peso e nomes dos
+competidores (ex: `2026-09-02_17-48-05_Beetleweight_TesteAzul2-vs-
+TesteVermelho2_sala-UBWA.txt`), cada linha no formato
+`[HH:MM:SS.mmm] <origem> :: <evento> -- <detalhe>`. Pasta `logs/` fica de
+fora do git (adicionada ao `.gitignore`, mesmo padrão de `room.txt`).
+
+**Testado contra o site real** (2026-09-02): nomes/peso lidos corretamente
+(precisou mover a leitura pra **antes** de clicar em "criar luta" — depois
+disso os campos viram texto estático e páram de responder a
+`.inputValue()`), cliques capturados corretamente, mudança de fase
+detectada. Exemplo real de saída:
+```
+[17:48:05.613] central (site) :: criar luta -- criar luta · começar setup→
+[17:48:05.635] central (site) :: iniciar round -- iniciar round →
+[17:48:05.797] site (fase) :: fase mudou -- live -> starting
+[17:48:09.793] site (fase) :: fase mudou -- starting -> live
+[17:48:10.035] central (site) :: abrir modal desistência -- desistência
+[17:48:10.067] central (site) :: desistência selecionada: azul -- TesteAzul2
+[17:48:10.093] central (site) :: cancelado -- cancelar
+```
+
+Ligado por padrão; desligar com `node forfeit.mjs --no-log-validacao` (ou
+adicionando a flag no comando que o `watch_arena.py` usa pra subir o
+processo, se quiser desligar permanentemente).
+
+**Limitação conhecida:** a detecção de fase por polling de texto pode
+ocasionalmente pegar uma leitura "fora de ordem" no primeiro instante (ex:
+detectar `live` antes de `starting` num timing muito apertado) — é uma
+checagem best-effort sem `data-testid` de apoio, não 100% precisa
+milissegundo a milissegundo, mas captura todas as transições reais.
 
 ---
 
