@@ -5,7 +5,15 @@ Claude, mais uma sessão de migração para um novo computador. É a fonte de ve
 única do projeto — cole este arquivo inteiro numa conversa nova do Claude pra
 retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
-Última atualização: 2026-08-26.
+Última atualização: 2026-08-27.
+
+> **✅ Validação extensa feita em 2026-08-27 (ver seção 2c):** lógica de
+> debounce simulada e testada (10/10), um bug real encontrado e corrigido no
+> `forfeit.mjs` (comando perdido depois do 1º forfeit), pinagem corrigida
+> (conflito de GPIO4) e MOSFET atualizado pra IRF540N (já validado
+> fisicamente pelo Erik), e testes ao vivo no site com múltiplos juízes —
+> inclusive **um método de recuperação rápida se um juiz cair e não
+> reconectar**, seção 2c.7.
 
 > **🚨 ESCOPO SIMPLIFICADO — competição é sexta-feira, ver seção 2b.** O design
 > completo das seções 4-7 (13→8 estados, DMX512, 6 botões) não vai dar tempo.
@@ -39,6 +47,7 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 2. [Sistema 1: botão físico → judge.tapout.gg (`tapout-forfeit-trigger`)](#2-sistema-1-botão-físico--judgetapoutgg)
    - [2a. Escala do projeto, orçamento e logística do evento](#2a-escala-do-projeto-orçamento-e-logística-do-evento)
    - [2b. 🚨 ESCOPO SIMPLIFICADO PRA SEXTA-FEIRA](#2b-escopo-simplificado-pra-sexta-feira-prioridade-máxima-atual)
+   - [2c. ✅ Validação 2026-08-27 (firmware, integração, site, recuperação de juiz)](#2c-validação-feita-em-2026-08-27--lógica-do-firmware-integração-e-site-real)
 3. [Mapa de comportamento real do site judge.tapout.gg](#3-mapa-de-comportamento-real-do-site-judgetapoutgg)
 4. [Sistema 2: controlador de iluminação DMX512 da arena](#4-sistema-2-controlador-de-iluminação-dmx512-da-arena)
    - [4.4a Diagrama visual corrigido (fluxo completo)](#44a-diagrama-visual-corrigido-fluxo-completo)
@@ -430,6 +439,157 @@ No repositório privado `tapout-forfeit-trigger`:
       lados (visual das luzes), aperta desistência de um lado, confere se a
       fita fica vermelha/verde nos lados certos e se o Tapout registrou a
       desistência do time certo.
+
+---
+
+## 2c. Validação feita em 2026-08-27 — lógica do firmware, integração e site real
+
+Sessão inteira dedicada a testar tudo que dava pra testar **sem** o hardware
+físico montado ainda: simulação da lógica de debounce, testes de ordem de
+comando contra o `forfeit.mjs` real, e testes ao vivo no site com múltiplos
+juízes. Um bug real foi encontrado e corrigido. Tudo documentado abaixo pra
+não precisar repetir.
+
+### 2c.1 Botão do árbitro: iniciar + alternar pausar/retomar
+
+Depois de confirmar no site real que `admin-btn-pause` é o **mesmo**
+elemento nos dois estados (pausar/retomar só muda o texto), o botão do
+árbitro (`esp32-arena/src/main.cpp`) foi expandido: **1º toque = inicia a
+luta** (`REF_START`), **toques seguintes = alterna pausar/retomar**
+(`REF_PAUSE`) — reseta sozinho pro próximo `REF_START` assim que um
+competidor desiste. `forfeit.mjs` ganhou o comando `PAUSE` (clica
+`admin-btn-pause`) e `watch_arena.py` foi atualizado pra rotear `REF_PAUSE`.
+Firmware recompilado com sucesso.
+
+### 2c.2 Correção de pinagem e MOSFET (a partir de `fita_led_18horas.cpp`)
+
+O Erik forneceu um sketch próprio (`fita_led_18horas.cpp`, um teste de rotina
+de cores de 18h não relacionado à arena) que já validou fisicamente, por
+horas, o driver de MOSFET **IRF540N** nos pinos **GPIO15(R)/GPIO4(G)/GPIO16(B)**
+pra uma fita RGB 12V. Dois ajustes feitos:
+- **Corrigido um conflito de pino**: o firmware da arena tinha GPIO4 reservado
+  pro contato NF do botão vermelho, colidindo com o canal Verde já testado.
+  Pinagem do lado vermelho realocada (`PIN_RED_NA=13, PIN_RED_NF=5,
+  PIN_RED_RELAY=17, PIN_RED_R=18, PIN_RED_G=19, PIN_RED_B=21`).
+- Lado azul passou a usar os **mesmos pinos R/G/B já testados**
+  (GPIO15/4/16), reaproveitando a fiação/validação existente.
+- Documentação atualizada: o MOSFET recomendado na seção 7.2 (IRLZ44N) foi
+  **substituído pelo IRF540N**, que é o que o Erik já testou e confirmou
+  funcionando na prática — prevalece o componente validado.
+
+### 2c.3 Simulação da lógica de debounce/validação NA+NF (10/10 testes)
+
+Sem compilador C++ disponível na máquina (tentativa de instalar o WinLibs/GCC
+via winget falhou 2x por erro de rede, não bloqueante — o firmware real já
+compila com sucesso via PlatformIO/xtensa, então a lógica em si já está
+validada pelo toolchain de verdade). A lógica de `updateButton()` foi portada
+1:1 pra Python e testada com um simulador que chama a função a cada 5ms
+(igual ao `delay(5)` do `loop()` real), cobrindo:
+
+| # | Cenário | Resultado |
+|---|---|---|
+| 1 | Aperto/soltura limpos, sem ruído | ok — edge em ~25ms |
+| 2 | Ruído: os 2 contatos fecham ao mesmo tempo (impossível fisicamente) | ok — ignorado, zero edges |
+| 3 | Ruído: os 2 contatos abrem ao mesmo tempo (fio rompido) | ok — ignorado, zero edges |
+| 4 | Bounce mecânico real (treme ~15ms antes de estabilizar) | ok — só 1 edge sobrevive |
+| 5 | Toque mais rápido que o debounce (10ms) | ok — filtrado, zero edges |
+| 6 | Toque duplo normal | ok — 4 edges corretas (press/release/press/release) |
+| 7 | Segurar apertado por 1s inteiro | ok — só 1 edge, nunca repete sozinho |
+| 8 | Ruído no MEIO da contagem de debounce | ok — reinicia a contagem, não confirma cedo |
+| 9 | Os 2 botões (azul/vermelho) pressionados juntos | ok — totalmente independentes |
+| 10 | 200ms de ruído aleatório contínuo | ok — zero falsos positivos |
+
+**Resultado: 10/10.** A lógica de debounce está sólida contra os tipos de
+ruído que preocupavam o Erik (seção 4.6) — nenhum cenário testado gerou um
+evento de desistência falso.
+
+### 2c.4 Bug real encontrado e corrigido: comando perdido depois do 1º forfeit
+
+Testando `forfeit.mjs --interactive` de verdade (processo real, contra o
+site real): depois de uma desistência, o processo entra num modo "aguarde
+ENTER pra fechar o browser" — e **qualquer** stdin novo (inclusive um
+`START` legítimo pra próxima luta) era interpretado como "fechar", encerrando
+o processo **sem iniciar a próxima luta**. Isso quebraria o botão do árbitro
+entre uma luta e outra bem no meio do evento.
+
+**Corrigido**: no modo `--interactive`, o browser agora só fecha quando a
+própria janela é fechada manualmente — não reage mais a stdin nenhum depois
+de terminar uma luta. `watch_arena.py` também foi ajustado pra "esquecer" o
+processo antigo depois de um `FORFEIT` (mesmo padrão que o `watch_button.py`
+original do Sistema 1 já usava) — a próxima luta sempre sobe um processo e
+browser **novos**, deixando o antigo aberto só pra conferência.
+
+### 2c.5 Outros testes de ordem de comando (todos ok)
+
+- `FORFEIT` ou `PAUSE` enviado **antes** de qualquer `START` (sem sala
+  criada ainda): ignorado com mensagem clara, sem travar nem crashar.
+- **`START` duplicado rápido** (simulando bounce no botão do árbitro): o 2º
+  comando espera o 1º terminar (processamento é sequencial) e detecta
+  corretamente "sala já existe" / "luta já existe" / "round já rodando" —
+  **idempotente, seguro**, mesmo sem esse tipo de proteção adicional no lado
+  do ESP32.
+- Comando desconhecido/lixo no meio do fluxo: logado como "comando
+  desconhecido", ignorado, não interrompe o fluxo normal.
+
+### 2c.6 Re-confirmação dos seletores do site (nada quebrado)
+
+Passado pelo fluxo real completo (criar luta → iniciar round → live →
+pausar → retomar → desistência) usando clique de mouse de verdade: **todos**
+os seletores que o `forfeit.mjs` usa continuam batendo
+(`admin-room-code`, `admin-btn-create-fight`, `admin-btn-start-round`,
+`admin-btn-forfeit`, `admin-confirm-forfeit`, `admin-forfeit-loser-blue/red`,
+`confirm-ok`, `confirm-cancel`). Também descobertos e documentados
+`admin-btn-ko` + modal (`admin-confirm-ko`, `admin-ko-winner-blue/red`),
+fora do escopo de sexta mas prontos pra quando quiserem automatizar o K.O.
+também. O texto de fase (`configuring`/`live`/etc.) continua **sem**
+`data-testid` — não mudou, ainda precisa ler por accessibility-tree/texto.
+
+### 2c.7 Comportamento com múltiplos juízes — testado com 4 abas reais
+
+Criada uma sala de teste e conectados 3 juízes reais (abas separadas) + uma
+4ª tentativa, pra responder a pergunta que ficava em aberto na seção 3.6:
+
+- **4º juiz com a sala cheia (3/3):** é **rejeitado** com uma tela dedicada
+  — "REMOVIDO DA SALA · motivo: `judges_full`" — não vira espectador, não
+  substitui ninguém, não hesita: barrado na hora, com um motivo estruturado
+  no próprio app (não é um erro genérico).
+- **Juiz que cai (aba fechada) NÃO libera a vaga rápido:** fechei a aba do
+  Juiz1 e testei o 4º juiz de novo imediatamente e depois de ~35s — **ambas
+  as vezes rejeitado como sala cheia.** A vaga "fantasma" não expira num
+  prazo curto (não temos garantia de quanto tempo leva, só confirmamos que
+  35s não é suficiente).
+- **Reentrar com o MESMO NOME, numa aba NOVA, NÃO reconecta:** tentei
+  reentrar como "Juiz1" (nome idêntico ao que caiu) numa aba diferente —
+  ainda rejeitado como sala cheia. **A identidade não é baseada no nome
+  digitado.**
+- **Recarregar a MESMA aba (mesmo dispositivo/navegador) FUNCIONA:**
+  re-navegar a aba que já estava conectada como "Juiz2" recuperou a vaga
+  dele automaticamente (voltou como "juiz 2", sem passar por
+  "judges_full"). A identidade parece depender de algo salvo no
+  navegador/aba original (localStorage ou peer id persistido), não do nome.
+- **Não existe botão de "remover juiz" no painel do admin** — conferido
+  visualmente na lista "conectados nesta sala": só mostra nome e papel, sem
+  nenhum controle de kick/remoção.
+
+**Conclusão prática, direto pro dia do evento:**
+1. Se um juiz perder a conexão, a **primeira tentativa** é sempre pedir pra
+   ele **recarregar a mesma aba, no mesmo aparelho** que ele já estava
+   usando — isso reconecta automaticamente na vaga dele, confirmado
+   funcionando.
+2. **Se isso não resolver** (aparelho trocado, perdido, ou navegador/aba
+   fechados de vez): não tem atalho dentro da mesma sala — o admin não
+   consegue liberar a vaga manualmente, e esperar não é confiável. **A saída
+   rápida é criar uma sala nova**: o admin clica em "voltar" e cria outra
+   sala do zero (gera código novo na hora), reconfigura nomes/peso/timer
+   (rápido, são só 3-4 campos) e reenvia o código novo pros 3 juízes (o QR
+   code/link já atualiza sozinho). Todos os juízes — não só o que caiu —
+   precisam reentrar com o código novo.
+3. **Plano B mais robusto, se a conectividade dos juízes for um problema
+   recorrente no dia**: usar o **modo standalone** (`#/standalone`, seção
+   3.4) em vez de sala com juízes remotos — 1 pessoa só, na mesma tela,
+   "expande pra 3 juízes" simulando o consenso sem depender de rede entre
+   dispositivos diferentes. Não depende de conexão nenhuma entre aparelhos,
+   então esse tipo de problema não existe nesse modo.
 
 ---
 
