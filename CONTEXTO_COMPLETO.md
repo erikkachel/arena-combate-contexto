@@ -7,11 +7,20 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 
 Última atualização: 2026-08-26.
 
+> **🚨 ESCOPO SIMPLIFICADO — competição é sexta-feira, ver seção 2b.** O design
+> completo das seções 4-7 (13→8 estados, DMX512, 6 botões) não vai dar tempo.
+> Erik cortou pra um MVP: 1 botão + 1 luz + 1 fita RGB **por competidor**, sem
+> painel central, sem juízes físicos, sem leitura automática da fase do site.
+> **Firmware já escrito e compilado com sucesso** em `esp32-arena/` no
+> repositório privado, junto com `forfeit.mjs` atualizado (time dinâmico) e o
+> novo `watch_arena.py`. Ver seção 2b pra lógica completa, pinagem, e o que
+> ainda falta testar fisicamente antes de sexta.
+
 > **Atualização (2026-08-26): conversa com o Berken (colega no projeto) lida na
-> íntegra.** Resolve a dúvida anterior sobre o botão cogumelo e traz informação
-> nova e importante sobre a escala real do projeto — **são 3 arenas, não 1** — e
-> sobre uma integração via API do tapout.gg em andamento. Ver seção 2a (escala e
-> logística) e a seção 4.6 atualizada (botão do competidor confirmado).
+> íntegra.** Resolve a dúvida anterior sobre o botão cogumelo (substituído pelo
+> `P20AMR-B-1A` no escopo simplificado, ver 2b) e traz informação nova sobre a
+> escala real do projeto — **são 3 arenas, não 1** — e sobre uma integração via
+> API do tapout.gg em andamento. Ver seção 2a (escala e logística).
 
 > **Nota de correção (2026-08-25):** circulou uma versão de diagrama (mermaid.live)
 > com um estado **"EMPATE"** e um estado **"NOCAUTE"** separados, faltando
@@ -29,6 +38,7 @@ retomar o trabalho do zero, sem perder nada do histórico de decisões.
 1. [Visão geral do projeto](#1-visão-geral-do-projeto)
 2. [Sistema 1: botão físico → judge.tapout.gg (`tapout-forfeit-trigger`)](#2-sistema-1-botão-físico--judgetapoutgg)
    - [2a. Escala do projeto, orçamento e logística do evento](#2a-escala-do-projeto-orçamento-e-logística-do-evento)
+   - [2b. 🚨 ESCOPO SIMPLIFICADO PRA SEXTA-FEIRA](#2b-escopo-simplificado-pra-sexta-feira-prioridade-máxima-atual)
 3. [Mapa de comportamento real do site judge.tapout.gg](#3-mapa-de-comportamento-real-do-site-judgetapoutgg)
 4. [Sistema 2: controlador de iluminação DMX512 da arena](#4-sistema-2-controlador-de-iluminação-dmx512-da-arena)
    - [4.4a Diagrama visual corrigido (fluxo completo)](#44a-diagrama-visual-corrigido-fluxo-completo)
@@ -282,6 +292,144 @@ decisão fechada.
 - Ainda precisa resolver: onde gravar (notebook dedicado, o mesmo PC que roda o
   tapout, ou o notebook do Berken) e, se for webcam com cabo curto (1-1,5m), talvez
   precise de um **extensor USB**.
+
+---
+
+## 2b. ESCOPO SIMPLIFICADO PRA SEXTA-FEIRA (prioridade máxima atual)
+
+**A competição é sexta-feira. Não dá tempo de fazer o design completo das
+seções 4-7 (13→8 estados, DMX512, 6 botões, focos de canto).** Erik decidiu
+cortar pra um escopo mínimo, já com firmware escrito, compilado com sucesso, e
+publicado no repositório privado (`tapout-forfeit-trigger`, pasta
+`esp32-arena/` + `watch_arena.py` + `forfeit.mjs` atualizado). As seções 4-7
+abaixo continuam documentando o design completo original — não foram
+descartadas, só **adiadas pra depois de sexta**. Este é o escopo que vale
+**agora**.
+
+### 2b.1 O que ficou (por competidor, não mais por "grupo central")
+
+- **1 botão** por competidor: modelo **Metaltex `P20AMR-B-1A`** (sem
+  retenção/momentâneo — diferente do cogumelo trava-e-gira cogitado antes),
+  contato **NA** nativo, mais um módulo **`M20-1B`** adicionado a cada botão
+  pra ganhar um segundo contato **NF** no mesmo atuador físico.
+- **1 luz de sinalização** por competidor: **Metaltex `L20-AR7-GP`** — LED
+  verde, **24V CA/CC**, corrente **< 20mA**, driver/resistor já integrado ao
+  corpo (não precisa resistor externo), furo de fixação Ø22,3mm (mesmo padrão
+  do botão P20, encaixam lado a lado no painel). Datasheet oficial confirmado:
+  [`l20-r.pdf` (Metaltex)](https://arquivo.metaltex.com.br/produtos/pdf/l20-r.pdf).
+- **1 fita RGB de 12V** por competidor (2 no total) — kit comercial que veio
+  com controle remoto sem fio e uma placa receptora `ALS-001-V1`. **Vamos
+  pular a placa receptora e o controle remoto de vez** — o ESP32 aciona a
+  fita direto.
+- **Juízes**: sem botão nem luz dedicada — usam celular (Tapout), como já
+  estava decidido antes.
+- **Cortado do escopo de sexta**: os 4 botões centrais (pausar/retomar,
+  k.o.-azul, k.o.-vermelho, encerrar), os 4 focos de canto DMX512/RS-485, e
+  qualquer leitura automática da fase do site pro controle de luz.
+
+### 2b.2 Lógica do botão — validação dupla NA+NF (por que e como)
+
+Objetivo do Erik: ter certeza absoluta que um evento de desistência é real —
+não ruído elétrico, não bug de firmware. Com os dois contatos ligados ao
+mesmo atuador físico:
+
+| Estado do botão | Contato NA | Contato NF | GPIO_NA (pull-up) | GPIO_NF (pull-up) |
+|---|---|---|---|---|
+| Solto | aberto | fechado | HIGH | LOW |
+| Pressionado | fecha | abre | LOW | HIGH |
+
+Nos dois estados válidos, **NA e NF são sempre opostos**. Regra de validação
+no firmware: `GPIO_NA != GPIO_NF` → leitura confiável, aceita; `GPIO_NA ==
+GPIO_NF` → leitura inválida (ruído, mau contato, ou o instante mecânico da
+troca entre os 2 blocos) → descartada, sem mudar de estado. Além disso, uma
+mudança só é aceita como definitiva depois de ficar estável por 25ms
+(`DEBOUNCE_MS`), filtrando bounce mecânico.
+
+### 2b.3 Gesto do botão e fluxo da luta (decisões confirmadas com o Erik)
+
+- **Toque simples alterna estado** (não precisa segurar, diferente do
+  `HOLD_MS=1000` do Sistema 1 original).
+- **1º toque** = "pronto": acende a luz L20 daquele lado; manda
+  `READY_BLUE`/`READY_RED` pela Serial (só informativo).
+- **2º toque** = desistência: apaga a luz L20 daquele lado; fita RGB daquele
+  lado fica **vermelha**, fita RGB do outro lado fica **verde**; manda
+  `FORFEIT_BLUE`/`FORFEIT_RED` pela Serial.
+- **1º toque de um novo ciclo** (depois de uma desistência anterior): as duas
+  fitas voltam a apagar antes de marcar o novo "pronto".
+- **Quem inicia a luta de verdade**: o **admin**, manualmente, digitando
+  `start` + ENTER no terminal do `watch_arena.py` — aciona a MESMA automação
+  Chrome (`forfeit.mjs --interactive`) que já existia, só que sem o gatilho
+  automático dos "2 prontos". O botão físico não cria sala nem inicia round
+  sozinho neste escopo.
+- **Limitação aceita pra sexta**: as fitas RGB só reagem ao botão físico de
+  desistência. Se a luta terminar por nocaute ou decisão dos juízes (sem
+  ninguém apertar o botão), as fitas não mudam de cor sozinhas — ficaria só
+  na tela do Tapout. Resolver isso exigiria ler a fase do site, que ficou de
+  fora do escopo simplificado.
+
+### 2b.4 Parte elétrica — o que ainda falta decidir/testar
+
+- **Luz L20 (24V):** o GPIO do ESP32 (3,3V, ~12mA) não aciona ela direto —
+  precisa de um **módulo relé de 2 canais, 5V de acionamento** (procurar
+  `SRD-05VDC-SL-C` — modelo mais comum/barato). **Confirmar se o módulo
+  comprado é ativo em LOW ou HIGH** antes de destravar o firmware (hoje
+  `RELAY_ACTIVE_LOW = true` por padrão em `esp32-arena/src/main.cpp` — ajustar
+  se for o contrário). Fonte de 24V separada (qualquer uma pequena, tipo
+  500mA, já sobra — as 2 luzes juntas consomem menos de 40mA).
+- **Fita RGB 12V (kit com receptor `ALS-001-V1`):** o plano é ignorar a placa
+  receptora e ligar a fita direto no ESP32 via **3 MOSFETs `IRLZ44N`** (1 por
+  canal R/G/B, nível lógico — liga com os 3,3V do GPIO sem problema),
+  assumindo fiação **common-anode** (1 fio comum de +12V, os outros 3 vão pro
+  GND individualmente pra acender cada cor). **Ainda não confirmado com
+  multímetro** qual dos 4 fios da fita é o `+12V` comum — passo a passo de
+  teste está descrito na conversa, precisa ser feito fisicamente antes de
+  ligar de verdade. GND do ESP32 e da fonte de 12V **precisam** estar
+  interligados (diferente do relé da luz, que fica isolado).
+- **Pinagem do firmware** (`esp32-arena/src/main.cpp`, ajustável no topo do
+  arquivo): Azul — NA=GPIO32, NF=GPIO33, relé=GPIO25, R/G/B=GPIO26/27/14.
+  Vermelho — NA=GPIO13, NF=GPIO4, relé=GPIO16, R/G/B=GPIO17/18/19. **Esses
+  pinos são um ponto de partida, não testado fisicamente ainda** — ajustar no
+  código se a fiação real usar outros GPIOs.
+- **Placa nova necessária**: este firmware é pra uma ESP32 DevKit comum (sem
+  LoRa), diferente da JVTECH usada no Sistema 1 — projeto separado em
+  `esp32-arena/` no mesmo repositório, com seu próprio `platformio.ini`
+  (porta não fixada, auto-detecta).
+
+### 2b.5 Software já implementado (compilado com sucesso, não testado com hardware real ainda)
+
+No repositório privado `tapout-forfeit-trigger`:
+- **`esp32-arena/src/main.cpp`** — firmware completo: leitura dupla NA+NF com
+  debounce, controle dos 2 relés (luzes) e das 2 fitas RGB (6 canais PWM via
+  `ledc`), máquina de estados local por competidor. Compilado com sucesso
+  (`pio run`), **nunca gravado num ESP32 físico ainda**.
+- **`forfeit.mjs`** — modificado pra aceitar `FORFEIT blue` / `FORFEIT red`
+  no modo `--interactive` (time dinâmico por comando, em vez do `--team blue`
+  fixo de antes). Retrocompatível — sem o time no comando, cai no
+  comportamento antigo (`--team` fixo ou pergunta no terminal).
+- **`watch_arena.py`** (novo, ao lado do `watch_button.py` original que
+  continua existindo pro Sistema 1 de 1 botão só) — escuta o ESP32 novo,
+  repassa `FORFEIT BLUE`/`FORFEIT RED` pro `forfeit.mjs`, e lê `start` do
+  teclado do admin pra iniciar a luta. **`PORT = "COM_AQUI"`** ainda precisa
+  ser ajustado pra porta real depois de conectar o ESP32 novo (mesmo processo
+  da seção 8: `Get-WmiObject Win32_PnPEntity | Where-Object { $_.Name -match
+  'CP210|CH340|FTDI|USB Serial' }`).
+
+### 2b.6 Próximos passos imediatos (antes de sexta)
+
+- [ ] Comprar/confirmar módulo relé 2 canais (5V) e testar se é ativo em LOW
+      ou HIGH.
+- [ ] Testar com multímetro qual fio da fita RGB é o `+12V` comum (passo a
+      passo na seção 2b.4) antes de ligar os MOSFETs de verdade.
+- [ ] Montar o circuito físico (botões + M20-1B + relés + MOSFETs) numa placa
+      perfurada, seguindo a pinagem do `esp32-arena/src/main.cpp` (ou ajustar
+      o código pra pinagem real escolhida).
+- [ ] Gravar o firmware (`pio run --target upload -d esp32-arena`) e testar
+      os 2 botões isoladamente antes de integrar com o `forfeit.mjs`.
+- [ ] Ajustar `PORT` em `watch_arena.py` pra porta COM real do ESP32 novo.
+- [ ] Testar o ciclo completo: admin digita `start`, aperta pronto nos 2
+      lados (visual das luzes), aperta desistência de um lado, confere se a
+      fita fica vermelha/verde nos lados certos e se o Tapout registrou a
+      desistência do time certo.
 
 ---
 
