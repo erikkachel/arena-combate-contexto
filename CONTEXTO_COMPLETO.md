@@ -894,6 +894,99 @@ não uma prova de que a integração completa aguenta 200 lutas reais.
   que ainda dizia que pausar/retomar "não é automatizado" (era verdade
   antes da seção 2c.5, ficou desatualizado depois).
 
+### 2d.6 Sessão de 2026-09-02 (noite): estresse de juízes, revisão via Gemini Pro, queda de WiFi, 100 lutas com duração variável
+
+Continuação da validação, focada em cenários mais adversariais e numa
+segunda revisão externa (desta vez com um modelo mais avançado, pedido
+explícito do Erik: "use um modelo mais avançado que ele tenha").
+
+**Bug real encontrado e corrigido: juízes "fantasmas" entre lutas.** O
+`MutationObserver` original que rastreava os contadores de hits dos
+juízes ficava preso ao nó DOM da primeira luta — numa sala com várias
+lutas seguidas, o React desmonta/remonta o painel a cada luta nova, e o
+observer parava de reportar qualquer coisa das lutas seguintes. Trocado
+por polling (reconsulta o DOM a cada 500ms comparando com o último valor
+visto), igual ao detector de fase já usava.
+
+**Melhorias no log de validação (`match_logger.mjs`), pedidas
+incrementalmente pelo Erik:**
+- Cronômetro do round em cada linha (`[MM:SS]` ou, nos últimos ~10s, o
+  site troca pro formato `S.ss` — o regex de leitura aceita os 2
+  formatos).
+- Soma de hits dos 3 juízes lado a lado em cada linha de hit
+  (`[2x4 | 4x2 | 0x2]`), e rótulo explícito `HIT AZUL`/`HIT VERMELHO`.
+- Nome do juiz + número (`Juiz Alpha (juiz 01)`) em vez de só `juiz 1`.
+- Rastreio do **dano final escolhido por cada juiz**, lido via
+  `admin-judge-line-N` (mostra `"juiz N · hits X×Y · dano A × B"`) — **só
+  pela página do admin**, sem precisar de acesso às páginas dos juízes.
+  Isso foi um pedido explícito do Erik depois que expliquei que dava pra
+  capturar isso instalando observadores nas páginas dos juízes: "na
+  prática os juízes estarão acessando o site pelo celular", então só a
+  leitura via admin é utilizável de verdade no evento.
+- Número da luta no nome do arquivo (`..._sala-XXXX_luta06.txt`).
+- Colunas alinhadas (horário/tempo/origem com largura fixa).
+- Bloco de resultado final destacado no fim de cada `.txt` (dano de cada
+  time + `>>> VENCEDOR: ... <<<`).
+
+**Revisão de código via Gemini (`gemini-pro-latest`, o modelo mais
+avançado disponível na conta) sobre `match_logger.mjs` e o script de
+teste de estresse.** Achados confirmados e corrigidos:
+- Nome de juiz continuava no log depois dele desconectar ("fantasma").
+- `previousFightSummary` podia vazar pra luta seguinte se algum chamador
+  esquecesse de resetar.
+- Rajadas de hit podiam agendar cliques *depois* do fim do round (erro de
+  limite na janela de tempo).
+- Estatística de hits contava cliques como "enviados" mesmo quando o
+  `.catch()` engolia uma falha real do clique.
+- Duas corridas (race conditions) reais: checar `.count()` instantâneo
+  logo após trocar de luta ou no desempate de hits 0×0 podia pegar a tela
+  no meio da atualização e tomar a decisão errada — corrigido com espera
+  ativa (`waitForFunction`/`Promise.race`) em vez de checagem instantânea.
+- Leitura do vencedor com `waitForTimeout(500)` fixo trocada por esperar
+  de verdade o texto "venceu" aparecer.
+Um ponto que o Gemini levantou mas foi conscientemente **não corrigido**:
+a suposição de que os primeiros 6 botões de dano são do lado azul e os
+próximos 6 do vermelho é frágil a mudanças de layout do site — mas
+validada contra o site real em 40+ lutas até agora, sem indício de
+quebra; fica como risco conhecido.
+
+**Teste de estresse de input dos juízes** (`tests/stress_judge_burst_5x60s.mjs`):
+6 cenários (mais dano vermelho, mais dano azul, sem dano nenhum, K.O.,
+desistência, empate de dano), com hits em rajada (vários cliques com
+15-60ms de diferença) ou ritmo normal, media de ~2-4 hits/s por juiz
+(reduzido de uma primeira tentativa bem mais agressiva, a pedido do Erik:
+"se ficar muito irreal, diminua a quantidade de hits"). Rodado com
+sucesso em lutas de 60s, 10s e 6 ciclos de 10s (36 lutas) sem travar.
+
+**Teste de queda de WiFi** (`tests/test_wifi_outage.mjs`/`test_wifi_outage2.mjs`):
+simulando `context.setOffline(true)` do Playwright durante uma
+desistência, o fluxo completo (clicar desistência → escolher time →
+confirmar) funcionou e **sincronizou corretamente** com uma sessão de
+juiz independente que nunca ficou offline — sem travar o processo nem o
+`match_logger`. Ressalva importante: o `forfeit.mjs` tem um comentário
+mencionando "sala (peer)", sugerindo que o site usa WebRTC ponto-a-ponto
+entre admin/juízes — e o `setOffline()` do Playwright não bloqueia
+tráfego WebRTC de forma garantida, então esse resultado é positivo mas
+não prova uma queda de WiFi 100% real. Existe um script preparado
+(`tests/test_wifi_outage_real.mjs`) pra repetir o teste com um bloqueio
+de firewall de verdade (precisa de terminal administrador — a sessão do
+Claude Code não tinha privilégio de admin nesta máquina), mas essa parte
+ficou pendente ("desista do teste por enquanto").
+
+**Teste de 100 lutas, duração média ~40s** (`tests/stress_100_fights_avg40s.mjs`):
+distribuição triangular de duração (10-80s, moda em 35s), viés de dano
+alto/baixo/azul/vermelho/empate variando por luta, e ~12% das lutas que
+terminam por K.O./desistência usam um corte "precoce" (dentro dos
+primeiros 3 segundos de vida da luta) — cenário raro mas realista pedido
+explicitamente pelo Erik. Smoke test de 5 lutas confirmou o corte precoce
+funcionando (K.O. aos 5.7s de luta). Rodada completa de 100 lutas
+lançada em segundo plano.
+
+Todos os scripts de teste desta sessão usam apenas cliques reais via CDP
+(`.click({force:true})`, nunca `dispatchEvent()` — testado que o site
+praticamente ignora eventos não-confiáveis depois do primeiro), e nunca
+apagam a pasta `logs/` (preferência explícita do Erik).
+
 ---
 
 ## 3. Mapa de comportamento real do site judge.tapout.gg
