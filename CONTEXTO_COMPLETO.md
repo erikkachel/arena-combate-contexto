@@ -982,6 +982,35 @@ explicitamente pelo Erik. Smoke test de 5 lutas confirmou o corte precoce
 funcionando (K.O. aos 5.7s de luta). Rodada completa de 100 lutas
 lançada em segundo plano.
 
+### 2d.7 Mudança real no site (2026-09-04): comportamento de desconexão/reconexão de juiz
+
+O Erik avisou que "o site sofreu alterações hoje... a principio as
+mudanças foram na hora da reconexão quando algum juiz desconectava da
+sala". Testado com `tests/test_judge_reconnect.mjs` (conecta um juiz,
+fecha a aba simulando queda, espera, reconecta com o MESMO nome na mesma
+sala) — **achados novos, ainda não confirmados como definitivos** (só 1
+teste rodado):
+
+- Depois de ~5s desconectado, o rótulo do juiz no admin muda de
+  `"... · online"` pra `"... · instável"` — um estado intermediário NOVO
+  que não existia antes (documentação anterior só mencionava "online"
+  ficando preso indefinidamente).
+- Apareceu um texto/ação **"kick"** ao lado do status de cada juiz —
+  possível novo botão do admin pra remover/liberar manualmente um juiz
+  travado (não testado clicar nele ainda).
+- Reconectar com o MESMO nome na MESMA sala **não retomou o slot
+  antigo** — o juiz entrou num slot NOVO (ex: foi pro "juiz 2" mesmo já
+  tendo entrado como "juiz 1" antes), deixando o slot antigo preso em
+  "instável" pra sempre (não observado se ele libera sozinho depois de
+  mais tempo, ou só via o botão "kick").
+
+**Implicação pra produção:** se o celular de um juiz perder conexão
+durante o evento e ele reabrir a página, ele provavelmente vai ocupar um
+NOVO slot em vez de retomar o antigo — com só 3 slots disponíveis, isso
+pode lotar a sala com juízes "instáveis" fantasmas depois de algumas
+quedas de conexão. Vale testar o botão "kick" antes do evento pra saber
+se resolve isso.
+
 Todos os scripts de teste desta sessão usam apenas cliques reais via CDP
 (`.click({force:true})`, nunca `dispatchEvent()` — testado que o site
 praticamente ignora eventos não-confiáveis depois do primeiro), e nunca
@@ -1727,6 +1756,134 @@ site real, salas `CVRU` e `VYYA`).
     a sala e iniciar o round; segundo toque deve desistir na mesma aba.
     **Recomendado testar antes com `--dry-run`** editando temporariamente o comando
     em `watch_button.py`, antes de confiar em produção.
+
+### 8.1 ESP32 NOVO (placa padrão, sem LoRa) — escopo simplificado, botão do competidor
+
+Diferente do Sistema 1 acima (que usa a placa JVTECH com LoRa). Este é o ESP32
+"DevKit" comum comprado pra sexta-feira, código em `esp32-arena/` (firmware real)
+e `esp32-blink-test/` (projeto isolado só pra validar a conexão, sem mexer no
+firmware de verdade).
+
+**Passo a passo (2026-09-04, testado até o ponto do upload — ver 8.5 sobre a
+limitação encontrada NESTA máquina específica):**
+
+1. Conectar o ESP32 via USB. Descobrir a porta COM (mesmo comando do passo 5
+   acima). Nesta sessão apareceu como `Silicon Labs CP210x USB to UART Bridge
+   (COM7)` — **o número muda de máquina pra máquina**, sempre redescobrir.
+2. Ajustar `upload_port = COMx` em `esp32-blink-test/platformio.ini` (ou em
+   `esp32-arena/platformio.ini` pra gravar o firmware de verdade) pra bater com
+   a porta encontrada.
+3. Testar a conexão ANTES de gravar o firmware de verdade, com o projeto de
+   blink isolado (`esp32-blink-test/`, já commitado no repo — pisca o LED do
+   GPIO2 e imprime "LED ON"/"LED OFF" pela Serial a cada 0,5s):
+   ```
+   cd esp32-blink-test
+   python -m platformio run --target upload
+   python -m platformio device monitor
+   ```
+4. Confirmando que o blink funciona, gravar o firmware de verdade:
+   ```
+   cd ../esp32-arena
+   python -m platformio run --target upload
+   ```
+
+**Ligação do botão do competidor (Metaltex P20AMR-B-1A + módulo M20-1B):**
+cada bloco de contato tem 2 terminais. O botão já vem com 1 bloco NA de
+fábrica; o M20-1B se encaixa atrás do mesmo corpo, adicionando um segundo
+bloco que deve dar o resultado OPOSTO do primeiro (fechado quando o de
+fábrica está aberto, e vice-versa) — **confirme com multímetro antes de
+plugar no ESP32**: solto → NA aberto / M20-1B fechado; apertado → NA fecha /
+M20-1B abre. Se os dois derem o mesmo resultado, o M20-1B está configurado
+como NA também (precisa reconfigurar), porque o firmware exige que os dois
+sempre discordem (validação dupla contra ruído).
+
+| | Azul | Vermelho |
+|---|---|---|
+| Contato NA | GPIO **32** | GPIO **13** |
+| Contato NF (M20-1B) | GPIO **33** | GPIO **5** |
+
+Cada contato usa só 2 fios (um terminal → GND, outro → o GPIO da tabela) —
+não precisa resistor externo, o firmware já usa pull-up interno
+(`INPUT_PULLUP`). Botão do árbitro (opcional, 1 fio só, sem M20-1B): GPIO
+**23** → um terminal; outro terminal → GND.
+
+Teste recomendado: ligar só o lado azul primeiro (GPIO32+33+GND, lado
+vermelho pode ficar desconectado sem problema), gravar o firmware, abrir o
+Monitor Serial (115200 baud) e apertar o botão — deve imprimir `READY_BLUE`
+no primeiro toque e `FORFEIT_BLUE` no segundo.
+
+### 8.2 Configurar o Gemini (revisão de código e fact-checking)
+
+Ferramentas em `gemini-tools/` (trazidas nesta sessão de uma pasta solta
+`PARA_NOVO_COMPUTADOR/6_gemini_check/` de outro projeto, agora dentro deste
+repo pra não depender de nada fora dele):
+
+1. `cp gemini-tools/.env.example gemini-tools/.env` e colar sua chave de API
+   do Gemini (gerada em https://aistudio.google.com/apikey) na linha
+   `GEMINI_API_KEY=...`. **Esse arquivo `.env` nunca vai pro Git** (está no
+   `.gitignore` da pasta).
+2. `check.mjs` — fact-checking simples de um texto/afirmação:
+   ```
+   node gemini-tools/check.mjs "texto a conferir"
+   ```
+   Usa `GEMINI_MODEL` do `.env` (padrão: `gemini-3.6-flash`) ou a variável de
+   ambiente do mesmo nome.
+3. `review_code.mjs` — revisão profunda de código (usado nesta sessão pra
+   revisar `match_logger.mjs` e os scripts de teste, achou 8 bugs reais):
+   ```
+   node gemini-tools/review_code.mjs <arquivo1> [arquivo2] ...
+   ```
+   Usa o modelo mais avançado disponível por padrão (`gemini-pro-latest`) —
+   pode trocar via `GEMINI_REVIEW_MODEL`. Pra ver a lista de modelos
+   disponíveis na conta: `GET
+   https://generativelanguage.googleapis.com/v1beta/models?key=SUA_CHAVE`.
+
+### 8.3 Catálogo de todos os scripts de teste (pasta `tests/`)
+
+Todos usam Playwright contra o **site real** (`https://judge.tapout.gg`,
+`channel:'chrome'` — usa o Chrome já instalado, não o Chromium do
+Playwright) e o `match_logger.mjs` de verdade (gera `.txt` em `logs/`, que
+**nunca deve ser apagada** — preferência explícita do Erik, inclusive entre
+rodadas de teste).
+
+| Script | O que faz | Como rodar |
+|---|---|---|
+| `test_button_logic.py` | Réplica em Python da lógica de debounce NA+NF do firmware, 10 cenários | `python tests/test_button_logic.py` |
+| `test_forfeit_flow.mjs` | Testa ordem de comandos contra o `forfeit.mjs` real (antes/depois da luta, duplo clique) | `node tests/test_forfeit_flow.mjs` |
+| `stress_200_fights.mjs` | 200 lutas seguidas na mesma sala, só K.O./desistência (sem juízes), mede degradação de performance | `node tests/stress_200_fights.mjs <arquivo_saida> [N=200]` |
+| `simulate_500_fights.mjs` | Lutas com juízes reais (hits+dano) e gabarito em JSON pra validação cruzada com os `.txt` gerados | `node tests/simulate_500_fights.mjs <pasta_saida> [N=500]` |
+| `stress_judge_burst_5x60s.mjs` | 6 cenários de estresse de juízes (mais dano azul/vermelho, sem dano, K.O., desistência, empate), hits em rajada ou ritmo normal | `node tests/stress_judge_burst_5x60s.mjs [duracaoSeg=60] [ciclos=1]` |
+| `stress_100_fights_avg40s.mjs` | 100 lutas, duração variável média ~40s, viés de dano alto/baixo, corte precoce (<3s) ocasional | `node tests/stress_100_fights_avg40s.mjs [N=100]` |
+| `test_wifi_outage.mjs` / `test_wifi_outage2.mjs` | Simula queda de rede (`context.setOffline`) durante uma desistência — testa se o `match_logger` sobrevive e se sincroniza | `node tests/test_wifi_outage.mjs` |
+| `test_wifi_outage_real.mjs` | Igual ao anterior, mas com bloqueio de firewall REAL (precisa de terminal administrador rodando os comandos que o script pede nos pontos de pausa) | `node tests/test_wifi_outage_real.mjs` |
+| `test_judge_reconnect.mjs` | Testa o comportamento de queda/reconexão de juiz (achou o estado "instável" e o botão "kick", ver 2d.7) | `node tests/test_judge_reconnect.mjs` |
+| `probe_timer.mjs` / `probe_timer2.mjs` / `probe_damage_panel.mjs` | Scripts de inspeção do DOM usados pra descobrir seletores (cronômetro, painel de dano por juiz) — não são testes, são ferramentas de descoberta | `node tests/probe_*.mjs` |
+
+Todos os scripts `stress_*`/`simulate_*`/`test_*` abrem uma janela real do
+Chrome (`headless: false`) — rodar com a tela disponível, não numa sessão
+sem GUI.
+
+### 8.4 Anotação: limitação de acesso a hardware encontrada NESTA máquina (2026-09-04)
+
+Esta sessão específica do Claude Code **não conseguiu acessar a porta
+serial do ESP32** (nem via Bash sandboxado, nem com `dangerouslyDisableSandbox:
+true`, nem via PowerShell nativo, nem instalando um MCP server dedicado —
+`serial-mcp`, https://github.com/qarnet/serial-mcp — que chegou a conectar
+mas não resolveu porque o upload de firmware ainda precisa rodar via
+subprocesso `platformio`/`esptool`, que passa pelo mesmo bloqueio). O
+Windows reconhece o dispositivo normalmente (WMI/Gerenciador de
+Dispositivos), mas nenhum processo lançado pelo Claude Code nesta instalação
+consegue abrir `COM7` (erro consistente: "could not open port... o sistema
+não pode encontrar o arquivo especificado"). Comparando com o histórico
+desta mesma sessão): no computador anterior (`CONTEXTO COMPLETO` antigo,
+seção equivalente a esta), `pio run --target upload` funcionou direto, sem
+nenhum truque — ou seja, **isso é uma particularidade desta instalação/máquina
+específica** (provavelmente uma política de segurança/contêiner local), não
+algo inerente ao Claude Code em geral. Se o computador novo não tiver essa
+restrição, o upload deve funcionar direto (seção 8, passo 9, ou 8.1 acima).
+Se tiver a mesma restrição, o upload precisa ser rodado manualmente pelo
+Erik no terminal dele — o Claude prepara o código, mas não consegue gravar
+sozinho.
 
 ---
 
